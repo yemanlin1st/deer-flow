@@ -1,0 +1,126 @@
+schema: pefy.metaflow.omega.config.v1
+runtime_id: pefy_metaflow_omega
+status: controlled-engineering
+
+parent_system:
+  name: MƐTAPEFYON Ω
+  organization: GROUP PEFY-CONSULTING GLOBAL
+
+runtime:
+  primary_adapter: deerflow
+  adapter_is_replaceable: true
+  production_self_mutation: false
+  unknown_tools: deny
+  least_privilege: true
+  sandbox_first: true
+  default_mode: STANDARD
+
+challenge:
+  policy: all
+  counsellors:
+    - Strategy & Growth
+    - IMS & Operations
+    - Finance & Cash
+    - Digital, Data & Cyber
+    - Brand, IP & Customer
+  councils:
+    - Security & Governance
+    - Deep Loop
+    - Strategy
+    - Quality & Delivery
+    - Data & Intelligence
+    - Finance & Value
+    - Legal & IP
+    - GitOps & Release
+    - R&D / Product
+    - Executive & War Room
+    - Knowledge & Evidence
+    - Language & Communications
+    - Impact
+  depth_by_mode:
+    FLASH: compact
+    STANDARD: compact
+    PRO: full
+    ULTRA: adversarial
+    SOVEREIGN: adversarial
+    WARROOM: adversarial
+
+memory:
+  tenant_isolation: required
+  project_isolation: required
+  minimum_necessary_context: true
+  semantic_backend: ${PEFY_SEMANTIC_MEMORY_BACKEND:-not-configured}
+  project_vault_backend: ${PEFY_PROJECT_VAULT_BACKEND:-not-configured}
+  core_store_backend: ${PEFY_CORE_STORE_BACKEND:-not-configured}
+
+model_routing:
+  provider_lock_in: false
+  prefer_private_runtime_for_restricted_data: true
+  dimensions:
+    - capability_fit
+    - latency
+    - cost
+    - sensitivity
+    - data_residency
+    - context_window
+    - tool_use_quality
+    - local_availability
+    - benchmark_score
+    - provider_health
+
+humanization:
+  enabled: true
+  remove_zero_width: true
+  remove_generic_chatbot_residue: true
+  normalize_whitespace: true
+  preserve_required_disclosure: true
+  remove_citations: false
+  remove_required_provenance: false
+
+release:
+  classes:
+    - PRIVATE_WORKING
+    - INTERNAL_CONFIDENTIAL
+    - RESTRICTED_CLIENT
+    - PUBLIC_NEUTRALIZED
+  default: PRIVATE_WORKING
+
+consequential_actions:
+  require_explicit_owner_approval: true
+  blocked_without_approval:
+    - write
+    - delete
+    - send
+    - payment
+    - signature
+    - secret_access
+    - production_deploy
+    - account_wide_change
+    - external_publish
+
+observability:
+  enabled: true
+  redact_secrets: true
+  evidence_events:
+    - mission.routed
+    - council.challenge.completed
+    - task.dispatched
+    - artifact.produced
+    - evidence.verified
+    - humanization.completed
+    - release.gated
+    - mission.completed
+
+continuous_improvement:
+  deep_loop_required_for_promotion: true
+  benchmark_before_after: true
+  lifecycle:
+    - discover
+    - assess
+    - sandbox
+    - benchmark
+    - stage
+    - approve
+    - release
+    - monitor
+    - rollback
