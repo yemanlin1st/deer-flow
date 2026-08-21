@@ -135,10 +135,26 @@ class PefyMetaFlowOrchestrator:
                 "reasons": route.reasons,
                 "hard_gates": route.hard_gates,
                 "blocked_actions": route.blocked_actions,
+                "tenant_context_present": bool(mission.tenant_id),
+                "project_context_present": bool(mission.project_id),
             },
         )
         if ref:
             evidence_refs.append(ref)
+
+        tenant_isolation_required = "tenant-isolation" in route.hard_gates
+        if tenant_isolation_required and not (mission.tenant_id or "").strip():
+            self._record(
+                "mission.blocked",
+                {
+                    "mission_id": mission.mission_id,
+                    "reason": "tenant-context-missing",
+                    "gate": "tenant-isolation",
+                },
+            )
+            raise PermissionError(
+                "tenant_id is required before confidential, restricted or client-scoped execution"
+            )
 
         prior_context: tuple[Mapping[str, Any], ...] = ()
         if self._memory is not None:
@@ -151,6 +167,8 @@ class PefyMetaFlowOrchestrator:
                 "memory.retrieved",
                 {
                     "mission_id": mission.mission_id,
+                    "tenant_context_present": bool(mission.tenant_id),
+                    "project_context_present": bool(mission.project_id),
                     "input_record_count": raw_count,
                     "retained_record_count": len(prior_context),
                     "retained_string_chars": approximate_context_chars(prior_context),
@@ -208,6 +226,7 @@ class PefyMetaFlowOrchestrator:
                 "preserve_required_provenance": True,
                 "structured_export_filter": True,
                 "bounded_memory_context": True,
+                "tenant_isolation_required": tenant_isolation_required,
                 "memory_context_max_records": self._memory_budget.max_records,
                 "memory_context_max_total_chars": self._memory_budget.max_total_chars,
                 "blocked_actions": route.blocked_actions,
@@ -217,6 +236,7 @@ class PefyMetaFlowOrchestrator:
                 "humanization_gate": True,
                 "structured_export_gate": True,
                 "memory_budget_gate": True,
+                "tenant_context_gate": tenant_isolation_required,
                 "release_gate": True,
             },
         }
