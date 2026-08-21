@@ -50,14 +50,14 @@ This architecture keeps DeerFlow replaceable and prevents vendor/framework lock-
 
 | Mode | Use | Default execution pattern |
 |---|---|---|
-| `FLASH` | low-risk, time-sensitive work | one primary agent, minimal retrieval, no unnecessary council fan-out |
-| `STANDARD` | normal professional work | primary agent + targeted specialists + verification |
-| `PRO` | multi-step deliverables | planning, parallel sub-agents, evidence and quality gates |
-| `ULTRA` | complex cross-domain work | multi-agent swarm, memory, tools, sandbox, deep verification |
-| `SOVEREIGN` | confidential, regulated, IP-sensitive work | local/private providers preferred, strict data boundaries, PEA/council challenge |
-| `WARROOM` | critical incidents and high-stakes decisions | executive control, security/risk/legal challenge, immutable evidence and explicit approvals |
+| `FLASH` | low-risk, time-sensitive work | all 18 challenge functions in compact mode, then one primary execution agent |
+| `STANDARD` | normal professional work | all 18 challenge functions in compact mode, then targeted specialists + verification |
+| `PRO` | multi-step deliverables | all 18 challenge functions in full mode, planning, parallel sub-agents, evidence and quality gates |
+| `ULTRA` | complex cross-domain work | adversarial 18-function challenge, multi-agent swarm, memory, tools, sandbox, deep verification |
+| `SOVEREIGN` | confidential, regulated, IP-sensitive work | adversarial 18-function challenge, local/private providers preferred, strict data boundaries |
+| `WARROOM` | critical incidents and high-stakes decisions | adversarial 18-function challenge, executive control, immutable evidence and explicit approvals |
 
-Mode selection is policy-driven. A user may request a mode, but confidentiality, legal, safety or production risk can force a stricter mode.
+Mode selection is policy-driven. A user may request a stricter mode, but confidentiality, legal, safety or production risk can force a higher-governance mode.
 
 ## 4. Core pipeline
 
@@ -66,10 +66,11 @@ mission intake
   -> classify purpose / confidentiality / risk / audience
   -> retrieve prior PEFY assets and evidence
   -> capability discovery through OMNIA Skillspector
-  -> PEA + relevant councils challenge
+  -> PEA + all 5 counsellors + all 13 councils challenge
   -> execution-mode selection
   -> plan and graph decomposition
-  -> parallel agent / agency / skill execution
+  -> activate only the execution specialists required by the mission
+  -> parallel agent / agency / skill execution where branches are independent
   -> sandbox and tool calls
   -> synthesis
   -> evidence / factual / compliance verification
@@ -81,7 +82,9 @@ mission intake
 
 ## 5. PEA + councils integration
 
-MƐTAFLOW Ω™ does not call every specialist for every trivial request. It calls the **relevant** councils proportionately while always preserving the council-review capability as a governance layer.
+MƐTAFLOW Ω™ invokes **all five counsellors and all thirteen specialist councils/agencies on every mission**. The difference between modes is challenge depth, not whether a council is silently omitted. A challenge function with no material objection returns `NO_MATERIAL_OBJECTION` and remains traceable.
+
+To preserve speed, FLASH and STANDARD use compact challenge payloads. PRO uses full challenge. ULTRA, SOVEREIGN and WARROOM use adversarial challenge. After governance review, only the execution agents and agencies actually required for the mission are activated.
 
 ### PEA
 
@@ -180,9 +183,11 @@ PEA Sovereign Orchestrator
         |
 MƐTAFLOW Ω Mission Router
         |
+All 5 Counsellors + All 13 Councils
+        |
 +-------------------+--------------------+-------------------+
 |                   |                    |                   |
-Councils        PEFY Agencies       Deep Agents         Skill Mesh
+PEFY Agencies   Deep Agents          Skill Mesh       Evidence/Memory
 |                   |                    |                   |
 +-------------------+--------------------+-------------------+
         |
@@ -218,7 +223,7 @@ MƐTAFLOW Ω™ is designed to interoperate with, not replace:
 
 ## 11. Agency behavior
 
-MƐTAFLOW Ω™ may act as a **meta-agency**. It does not try to be the best specialist in every domain. It identifies the mission, activates the right specialist agency, allocates context, assigns acceptance criteria, coordinates parallel work and performs final synthesis and release gating.
+MƐTAFLOW Ω™ may act as a **meta-agency**. It does not try to be the best specialist in every domain. It identifies the mission, runs the full governance challenge, activates the right execution agencies, allocates context, assigns acceptance criteria, coordinates parallel work and performs final synthesis and release gating.
 
 Examples:
 
@@ -238,6 +243,7 @@ The runtime must measure:
 - time to first useful output
 - p50 / p95 end-to-end latency
 - parallelization efficiency
+- challenge overhead by mode
 - accepted output on first pass
 - factual correction rate
 - evidence coverage
@@ -299,7 +305,7 @@ The current fork must first be reconciled with the official DeerFlow 2.x upstrea
 11. benchmark suite
 12. rollback test
 13. controlled pilot
-14. PEA + councils release review
+14. PEA + all counsellors + all councils release review
 
 ## 16. Council decision
 
@@ -309,6 +315,7 @@ Conditions:
 
 - DeerFlow remains an upstream adapter and retains MIT attribution.
 - PEFY confidential prompts, credentials, client data and proprietary decision rules are not committed to the public upstream fork.
+- All five counsellors and all thirteen councils are invoked for every mission, with challenge depth scaled by risk and mode.
 - Production actions remain human-governed.
 - Humanization improves writing and removes accidental machine artifacts but does not falsify required provenance.
 - Promotion depends on measured tests and evidence, not labels.
