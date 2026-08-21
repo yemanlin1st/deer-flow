@@ -49,9 +49,9 @@ jobs:
           backend/tests/test_pefy_metaflow_memory.py
 
   omega-vector-rs:
-    name: ΩVECTOR-RS build / lint / test
+    name: ΩVECTOR-RS build / lint / test / benchmark
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -77,6 +77,33 @@ jobs:
           cargo +1.97.1 test
           --manifest-path rust/pefy-vector-rs/Cargo.toml
           --all-targets
+
+      - name: Qualification smoke benchmark
+        env:
+          OMEGA_BENCH_VECTORS: "1024"
+          OMEGA_BENCH_DIMENSIONS: "64"
+          OMEGA_BENCH_QUERIES: "12"
+          OMEGA_BENCH_K: "5"
+          OMEGA_BENCH_MAX_NEIGHBORS: "12"
+          OMEGA_BENCH_EF_CONSTRUCTION: "96"
+          OMEGA_BENCH_EF_SEARCH: "80"
+          OMEGA_BENCH_RERANK: "48"
+          OMEGA_BENCH_QUERY_MEMORY_MB: "4"
+        run: >-
+          cargo +1.97.1 run --release
+          --manifest-path rust/pefy-vector-rs/Cargo.toml
+          --bin omega-vector-bench
+          > omega-vector-benchmark.json
+
+      - name: Validate benchmark JSON
+        run: python -m json.tool omega-vector-benchmark.json
+
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: omega-vector-benchmark
+          path: omega-vector-benchmark.json
+          retention-days: 30
 
       - name: Verify formatted Rust is committed
         run: git diff --exit-code -- rust/pefy-vector-rs
