@@ -8,6 +8,11 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from .export_filter import ExportableMessage, filter_export_messages, render_export_text
 from .humanize import OutputHygienePolicy, clean_output
+from .memory_budget import (
+    MemoryBudgetPolicy,
+    approximate_context_chars,
+    compact_memory_records,
+)
 from .policy import MissionContext, ReleaseClass, RouteDecision, route_mission
 from .registry import select_execution_agencies
 
@@ -89,9 +94,9 @@ class _NullChallengeAdapter:
 class PefyMetaFlowOrchestrator:
     """PEFY mission router above replaceable agent-harness runtimes.
 
-    It prepares policy, memory, full council challenge and evidence context
-    before dispatch. Consequential actions remain blocked unless the mission
-    carries explicit owner authority.
+    It prepares policy, bounded memory, full council challenge and evidence
+    context before dispatch. Consequential actions remain blocked unless the
+    mission carries explicit owner authority.
     """
 
     def __init__(
@@ -102,12 +107,15 @@ class PefyMetaFlowOrchestrator:
         memory_adapter: MemoryAdapter | None = None,
         runtime_adapter: RuntimeAdapter | None = None,
         output_hygiene_policy: OutputHygienePolicy | None = None,
+        memory_budget_policy: MemoryBudgetPolicy | None = None,
     ) -> None:
         self._challenge = challenge_adapter or _NullChallengeAdapter()
         self._evidence = evidence_adapter
         self._memory = memory_adapter
         self._runtime = runtime_adapter
         self._hygiene = output_hygiene_policy or OutputHygienePolicy()
+        self._memory_budget = memory_budget_policy or MemoryBudgetPolicy()
+        self._memory_budget.validate()
 
     def _record(self, event_type: str, payload: Mapping[str, Any]) -> str | None:
         if self._evidence is None:
@@ -134,7 +142,26 @@ class PefyMetaFlowOrchestrator:
 
         prior_context: tuple[Mapping[str, Any], ...] = ()
         if self._memory is not None:
-            prior_context = tuple(self._memory.retrieve(mission=mission, query=mission.objective))
+            raw_context = self._memory.retrieve(mission=mission, query=mission.objective)
+            raw_count = len(raw_context)
+            prior_context = compact_memory_records(raw_context, self._memory_budget)
+            del raw_context
+
+            ref = self._record(
+                "memory.retrieved",
+                {
+                    "mission_id": mission.mission_id,
+                    "input_record_count": raw_count,
+                    "retained_record_count": len(prior_context),
+                    "retained_string_chars": approximate_context_chars(prior_context),
+                    "max_records": self._memory_budget.max_records,
+                    "max_total_chars": self._memory_budget.max_total_chars,
+                    "max_string_chars": self._memory_budget.max_string_chars,
+                    "deduplicate": self._memory_budget.deduplicate,
+                },
+            )
+            if ref:
+                evidence_refs.append(ref)
 
         challenge_functions = route.counsellors + route.councils
         challenges = tuple(
@@ -180,12 +207,16 @@ class PefyMetaFlowOrchestrator:
                 "production_self_mutation": False,
                 "preserve_required_provenance": True,
                 "structured_export_filter": True,
+                "bounded_memory_context": True,
+                "memory_context_max_records": self._memory_budget.max_records,
+                "memory_context_max_total_chars": self._memory_budget.max_total_chars,
                 "blocked_actions": route.blocked_actions,
             },
             "acceptance": {
                 "evidence_required": route.evidence_required,
                 "humanization_gate": True,
                 "structured_export_gate": True,
+                "memory_budget_gate": True,
                 "release_gate": True,
             },
         }
