@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Protocol
 
 from .export_filter import ExportableMessage, filter_export_messages, render_export_text
 from .humanize import OutputHygienePolicy, clean_output
