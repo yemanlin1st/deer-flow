@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-
 _ZERO_WIDTH_RE = re.compile(r"[\u200B-\u200D\u2060\uFEFF]")
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
 _TRAILING_WS_RE = re.compile(r"[ \t]+$", re.MULTILINE)
