@@ -31,17 +31,28 @@ class MemoryBudgetPolicy:
 
 _PRIORITY_FIELDS = (
     "memory_id",
-    "score",
-    "kind",
-    "summary",
-    "excerpt",
     "evidence_ref",
     "source_ref",
-    "updated_at",
-    "project_id",
-    "tenant_id",
     "decision_id",
+    "tenant_id",
+    "project_id",
+    "score",
+    "kind",
+    "updated_at",
     "status",
+    "summary",
+    "excerpt",
+)
+
+_NON_TRUNCATABLE_FIELDS = frozenset(
+    {
+        "memory_id",
+        "evidence_ref",
+        "source_ref",
+        "decision_id",
+        "tenant_id",
+        "project_id",
+    }
 )
 
 _DENIED_FIELD_FRAGMENTS = (
@@ -151,6 +162,8 @@ def compact_memory_records(
             if added_chars > remaining_chars:
                 if remaining_chars <= 0:
                     break
+                if field in _NON_TRUNCATABLE_FIELDS:
+                    continue
                 converted = converted[:remaining_chars]
                 added_chars = len(converted)
 
