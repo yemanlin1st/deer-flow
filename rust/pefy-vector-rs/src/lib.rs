@@ -138,6 +138,15 @@ struct Meta {
     generation: u64,
 }
 
+#[derive(Clone, Copy)]
+struct BackingFiles<'a> {
+    q8: &'a File,
+    f16_data: &'a File,
+    graph: &'a File,
+    ids: &'a File,
+    tombstones: &'a File,
+}
+
 pub struct OmegaVectorIndex {
     dir: PathBuf,
     config: IndexConfig,
@@ -185,7 +194,9 @@ impl OmegaVectorIndex {
                 return Err(IndexError::CapacityExceeded);
             }
             if meta.count > meta.capacity || meta.capacity == 0 {
-                return Err(IndexError::Corrupt("invalid count/capacity relationship".into()));
+                return Err(IndexError::Corrupt(
+                    "invalid count/capacity relationship".into(),
+                ));
             }
             (meta.count as u32, meta.capacity as u32, meta.generation)
         } else {
@@ -210,11 +221,13 @@ impl OmegaVectorIndex {
         let tombstone_file = open_rw(dir.join("tombstones.u8"))?;
 
         resize_backing_files(
-            &q8_file,
-            &f16_file,
-            &graph_file,
-            &ids_file,
-            &tombstone_file,
+            BackingFiles {
+                q8: &q8_file,
+                f16_data: &f16_file,
+                graph: &graph_file,
+                ids: &ids_file,
+                tombstones: &tombstone_file,
+            },
             capacity,
             config.dimensions,
             config.max_neighbors,
@@ -429,11 +442,13 @@ impl OmegaVectorIndex {
         drop((old_q8, old_f16, old_graph, old_ids, old_tombstones));
 
         resize_backing_files(
-            &self.q8_file,
-            &self.f16_file,
-            &self.graph_file,
-            &self.ids_file,
-            &self.tombstone_file,
+            BackingFiles {
+                q8: &self.q8_file,
+                f16_data: &self.f16_file,
+                graph: &self.graph_file,
+                ids: &self.ids_file,
+                tombstones: &self.tombstone_file,
+            },
             new_capacity,
             self.config.dimensions,
             self.config.max_neighbors,
@@ -497,10 +512,7 @@ impl OmegaVectorIndex {
             .enumerate()
             .map(|(i, &q)| {
                 let offset = start + i * 2;
-                let bits = u16::from_le_bytes([
-                    self.f16_data[offset],
-                    self.f16_data[offset + 1],
-                ]);
+                let bits = u16::from_le_bytes([self.f16_data[offset], self.f16_data[offset + 1]]);
                 f16::from_bits(bits).to_f32() * q
             })
             .sum()
@@ -513,7 +525,11 @@ impl OmegaVectorIndex {
 
     fn external_id(&self, node: u32) -> u64 {
         let start = node as usize * 8;
-        u64::from_le_bytes(self.ids[start..start + 8].try_into().expect("8-byte id slice"))
+        u64::from_le_bytes(
+            self.ids[start..start + 8]
+                .try_into()
+                .expect("8-byte id slice"),
+        )
     }
 
     fn graph_offset(&self, node: u32) -> usize {
@@ -597,11 +613,19 @@ impl OmegaVectorIndex {
         requested.min(max_by_budget).max(1)
     }
 
-    fn approx_candidates(&self, query: &[u8], requested_ef: usize, upper_bound: u32) -> Vec<(i64, u32)> {
+    fn approx_candidates(
+        &self,
+        query: &[u8],
+        requested_ef: usize,
+        upper_bound: u32,
+    ) -> Vec<(i64, u32)> {
         if upper_bound == 0 {
             return Vec::new();
         }
-        let ef = self.effective_ef(requested_ef).min(upper_bound as usize).max(1);
+        let ef = self
+            .effective_ef(requested_ef)
+            .min(upper_bound as usize)
+            .max(1);
         let max_seen = ef
             .saturating_mul(self.config.max_neighbors.saturating_add(2))
             .min(self.effective_ef(usize::MAX))
@@ -623,12 +647,12 @@ impl OmegaVectorIndex {
 
         let mut expanded = 0usize;
         while let Some((score, node)) = frontier.pop() {
-            if best.len() >= ef {
-                if let Some(Reverse((worst_score, _))) = best.peek().copied() {
-                    if expanded >= ef && score < worst_score {
-                        break;
-                    }
-                }
+            if best.len() >= ef
+                && let Some(Reverse((worst_score, _))) = best.peek().copied()
+                && expanded >= ef
+                && score < worst_score
+            {
+                break;
             }
             if expanded >= max_seen {
                 break;
@@ -687,23 +711,23 @@ fn map_rw(file: &File) -> std::io::Result<MmapMut> {
 }
 
 fn resize_backing_files(
-    q8: &File,
-    f16_data: &File,
-    graph: &File,
-    ids: &File,
-    tombstones: &File,
+    files: BackingFiles<'_>,
     capacity: u32,
     dimensions: usize,
     max_neighbors: usize,
 ) -> std::io::Result<()> {
     let capacity = capacity as u64;
-    q8.set_len(capacity.saturating_mul(dimensions as u64))?;
-    f16_data.set_len(capacity.saturating_mul(dimensions as u64).saturating_mul(2))?;
-    graph.set_len(
+    files
+        .q8
+        .set_len(capacity.saturating_mul(dimensions as u64))?;
+    files
+        .f16_data
+        .set_len(capacity.saturating_mul(dimensions as u64).saturating_mul(2))?;
+    files.graph.set_len(
         capacity.saturating_mul((GRAPH_COUNT_BYTES + max_neighbors.saturating_mul(4)) as u64),
     )?;
-    ids.set_len(capacity.saturating_mul(8))?;
-    tombstones.set_len(capacity)?;
+    files.ids.set_len(capacity.saturating_mul(8))?;
+    files.tombstones.set_len(capacity)?;
     Ok(())
 }
 
@@ -772,4 +796,8 @@ fn write_meta(file: &mut File, meta: Meta) -> Result<()> {
     Ok(())
 }
 
-pub use ffi::{PefyVectorHandle, pefy_vector_add, pefy_vector_close, pefy_vector_flush, pefy_vector_open, pefy_vector_search};
+pub use ffi::{
+    PefyVectorHandle, PefyVectorStats, pefy_vector_add, pefy_vector_close, pefy_vector_flush,
+    pefy_vector_last_error, pefy_vector_mark_deleted, pefy_vector_open, pefy_vector_search,
+    pefy_vector_stats,
+};
