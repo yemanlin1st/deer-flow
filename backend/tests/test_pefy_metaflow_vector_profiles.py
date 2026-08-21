@@ -1,11 +1,17 @@
 from pathlib import Path
 
+import pytest
+
+from deerflow.pefy_omega.policy import MissionContext, ReleaseClass
 from deerflow.pefy_omega.vector_profiles import (
     EngineQualification,
     OmegaMemoryProfile,
     VectorEngine,
+    VectorEnginePaths,
     engine_namespace,
+    open_profiled_vector_index,
     profile_vector_config,
+    scoped_engine_namespace,
     select_vector_engine,
 )
 
@@ -71,6 +77,60 @@ def test_engine_namespaces_are_physically_separate():
     assert engine_namespace(root, compact) != engine_namespace(root, balanced)
     assert engine_namespace(root, compact).name == "compact-q8"
     assert engine_namespace(root, balanced).name == "balanced-q8-f16"
+
+
+def test_tenant_project_namespaces_are_hashed_and_physically_separate():
+    decision = select_vector_engine(OmegaMemoryProfile.BALANCED, _qualified())
+    root = Path("/var/lib/pefy/omega-memory")
+    tenant_a = scoped_engine_namespace(
+        root,
+        decision,
+        tenant_id="tenant-alpha-sensitive",
+        project_id="project-one-sensitive",
+    )
+    tenant_b = scoped_engine_namespace(
+        root,
+        decision,
+        tenant_id="tenant-beta-sensitive",
+        project_id="project-one-sensitive",
+    )
+    project_two = scoped_engine_namespace(
+        root,
+        decision,
+        tenant_id="tenant-alpha-sensitive",
+        project_id="project-two-sensitive",
+    )
+
+    assert tenant_a != tenant_b
+    assert tenant_a != project_two
+    rendered = str(tenant_a)
+    assert "tenant-alpha-sensitive" not in rendered
+    assert "project-one-sensitive" not in rendered
+    assert "tenant-" in rendered
+    assert "project-" in rendered
+
+
+def test_governed_profile_open_fails_closed_without_tenant_before_loading_library():
+    libraries = VectorEnginePaths(
+        balanced_library=Path("/missing/balanced.so"),
+        compact_library=Path("/missing/compact.so"),
+    )
+    mission = MissionContext(
+        mission_id="missing-tenant",
+        objective="restricted retrieval",
+        confidential=True,
+        release_class=ReleaseClass.RESTRICTED_CLIENT,
+    )
+
+    with pytest.raises(PermissionError, match="tenant_id"):
+        open_profiled_vector_index(
+            profile=OmegaMemoryProfile.SOVEREIGN,
+            dimensions=4,
+            qualification=None,
+            libraries=libraries,
+            index_root="/tmp/pefy-vector-test",
+            mission=mission,
+        )
 
 
 def test_profile_configuration_respects_memory_tiers():
