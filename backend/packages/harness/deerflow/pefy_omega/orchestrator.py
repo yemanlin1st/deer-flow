@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 
+from .export_filter import ExportableMessage, filter_export_messages, render_export_text
 from .humanize import OutputHygienePolicy, clean_output
-from .policy import MissionContext, RouteDecision, route_mission
+from .policy import MissionContext, ReleaseClass, RouteDecision, route_mission
+from .registry import select_execution_agencies
 
 
 class ChallengeAdapter(Protocol):
@@ -46,6 +48,7 @@ class PreparedMission:
     route: RouteDecision
     prior_context: tuple[Mapping[str, Any], ...]
     challenges: tuple[Mapping[str, Any], ...]
+    execution_agencies: tuple[str, ...]
     execution_packet: Mapping[str, Any]
     evidence_refs: tuple[str, ...] = ()
 
@@ -86,9 +89,9 @@ class _NullChallengeAdapter:
 class PefyMetaFlowOrchestrator:
     """PEFY mission router above replaceable agent-harness runtimes.
 
-    The class is intentionally runtime-neutral. It prepares policy, memory,
-    council and evidence context before dispatch. Consequential actions remain
-    blocked unless the mission context carries explicit owner authority.
+    It prepares policy, memory, full council challenge and evidence context
+    before dispatch. Consequential actions remain blocked unless the mission
+    carries explicit owner authority.
     """
 
     def __init__(
@@ -163,22 +166,26 @@ class PefyMetaFlowOrchestrator:
         if ref:
             evidence_refs.append(ref)
 
+        execution_agencies = select_execution_agencies(mission.domains)
         execution_packet: dict[str, Any] = {
             "schema": "pefy.metaflow.omega.execution.v1",
             "mission": asdict(mission),
             "route": asdict(route),
             "prior_context": prior_context,
             "challenges": challenges,
+            "execution_agencies": execution_agencies,
             "constraints": {
                 "deny_unknown_tools": True,
                 "least_privilege": True,
                 "production_self_mutation": False,
                 "preserve_required_provenance": True,
+                "structured_export_filter": True,
                 "blocked_actions": route.blocked_actions,
             },
             "acceptance": {
                 "evidence_required": route.evidence_required,
                 "humanization_gate": True,
+                "structured_export_gate": True,
                 "release_gate": True,
             },
         }
@@ -188,6 +195,7 @@ class PefyMetaFlowOrchestrator:
             route=route,
             prior_context=prior_context,
             challenges=challenges,
+            execution_agencies=execution_agencies,
             execution_packet=execution_packet,
             evidence_refs=tuple(evidence_refs),
         )
@@ -207,10 +215,50 @@ class PefyMetaFlowOrchestrator:
             {
                 "mission_id": prepared.mission.mission_id,
                 "mode": prepared.route.mode.value,
+                "execution_agencies": prepared.execution_agencies,
                 "runtime_result_keys": sorted(str(k) for k in result.keys()),
             },
         )
         return result
+
+    def _assert_release_ready(self, prepared: PreparedMission) -> None:
+        if prepared.mission.release_class is ReleaseClass.PRIVATE_WORKING:
+            return
+        if prepared.route.blocked_actions:
+            raise PermissionError("release blocked by unapproved consequential actions")
+
+        non_releasable = []
+        for challenge in prepared.challenges:
+            status = str(challenge.get("status", "")).strip().upper()
+            if status in {"PENDING_ADAPTER", "BLOCK", "FAILED", "ERROR"}:
+                non_releasable.append(
+                    f"{challenge.get('challenge_function', 'unknown')}={status or 'MISSING'}"
+                )
+        if non_releasable:
+            raise PermissionError(
+                "release blocked until council challenge is resolved: " + ", ".join(non_releasable)
+            )
+
+    def finalize_messages(
+        self,
+        prepared: PreparedMission,
+        messages: Sequence[ExportableMessage],
+        *,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> FinalizedOutput:
+        """Filter internal context structurally before final text rendering."""
+
+        exported = filter_export_messages(messages, hygiene_policy=self._hygiene)
+        rendered = render_export_text(exported)
+        self._record(
+            "structured_export.completed",
+            {
+                "mission_id": prepared.mission.mission_id,
+                "input_message_count": len(messages),
+                "exported_message_count": len(exported),
+            },
+        )
+        return self.finalize_output(prepared, rendered, metadata=metadata)
 
     def finalize_output(
         self,
@@ -219,6 +267,7 @@ class PefyMetaFlowOrchestrator:
         *,
         metadata: Mapping[str, Any] | None = None,
     ) -> FinalizedOutput:
+        self._assert_release_ready(prepared)
         cleaned = clean_output(content, self._hygiene)
         refs = list(prepared.evidence_refs)
 
@@ -240,6 +289,7 @@ class PefyMetaFlowOrchestrator:
                 "mission_id": prepared.mission.mission_id,
                 "release_class": prepared.mission.release_class.value,
                 "blocked_actions": prepared.route.blocked_actions,
+                "challenge_count": len(prepared.challenges),
             },
         )
         if ref:
