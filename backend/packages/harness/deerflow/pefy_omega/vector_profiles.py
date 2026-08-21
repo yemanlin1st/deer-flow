@@ -6,10 +6,12 @@ based on explicit qualification evidence, never on device class alone.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from .policy import MissionContext, ReleaseClass
 from .rust_vector import RustVectorConfig, RustVectorIndex
 
 
@@ -205,10 +207,43 @@ def profile_vector_config(
 
 
 def engine_namespace(root: str | Path, decision: VectorEngineDecision) -> Path:
-    """Return an engine-specific index namespace; never reuse cross-format files."""
+    """Return an engine-only namespace for non-governed tests and benchmarks."""
 
     suffix = "compact-q8" if decision.engine is VectorEngine.COMPACT else "balanced-q8-f16"
     return Path(root) / decision.profile.value.lower() / suffix
+
+
+def _scope_component(label: str, value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{label}_id must not be blank")
+    digest = hashlib.sha256(f"pefy-omega:{label}:{normalized}".encode()).hexdigest()[:20]
+    return f"{label}-{digest}"
+
+
+def scoped_engine_namespace(
+    root: str | Path,
+    decision: VectorEngineDecision,
+    *,
+    tenant_id: str,
+    project_id: str | None = None,
+) -> Path:
+    """Return a tenant/project-isolated namespace without exposing raw IDs."""
+
+    tenant_scope = _scope_component("tenant", tenant_id)
+    project_scope = (
+        _scope_component("project", project_id)
+        if project_id is not None and project_id.strip()
+        else "project-shared"
+    )
+    return (
+        Path(root)
+        / "tenants"
+        / tenant_scope
+        / "projects"
+        / project_scope
+        / engine_namespace("", decision)
+    )
 
 
 def open_profiled_vector_index(
@@ -218,8 +253,14 @@ def open_profiled_vector_index(
     qualification: EngineQualification | None,
     libraries: VectorEnginePaths,
     index_root: str | Path,
+    mission: MissionContext | None = None,
 ) -> tuple[RustVectorIndex, VectorEngineDecision]:
-    """Open the evidence-selected engine using the shared ABI adapter."""
+    """Open the evidence-selected engine using the shared ABI adapter.
+
+    Governed confidential/client scopes fail closed when tenant context is
+    missing. When tenant context is present, physical index paths are hashed
+    and isolated per tenant/project as well as per vector representation.
+    """
 
     decision = select_vector_engine(profile, qualification)
     config = profile_vector_config(decision.profile, dimensions=dimensions)
@@ -228,9 +269,28 @@ def open_profiled_vector_index(
         if decision.engine is VectorEngine.COMPACT
         else libraries.balanced_library
     )
+
+    namespace = engine_namespace(index_root, decision)
+    if mission is not None:
+        isolation_required = bool(
+            mission.confidential
+            or mission.client_data
+            or mission.release_class
+            in {ReleaseClass.INTERNAL_CONFIDENTIAL, ReleaseClass.RESTRICTED_CLIENT}
+        )
+        if isolation_required and not (mission.tenant_id or "").strip():
+            raise PermissionError("tenant_id is required before opening a governed vector index")
+        if mission.tenant_id:
+            namespace = scoped_engine_namespace(
+                index_root,
+                decision,
+                tenant_id=mission.tenant_id,
+                project_id=mission.project_id,
+            )
+
     index = RustVectorIndex(
         library_path=library_path,
-        index_path=engine_namespace(index_root, decision),
+        index_path=namespace,
         config=config,
     )
     return index, decision
