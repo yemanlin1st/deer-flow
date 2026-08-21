@@ -8,7 +8,10 @@ fn temp_index(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    std::env::temp_dir().join(format!("pefy-vector-rs-{name}-{}-{nonce}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "pefy-vector-rs-{name}-{}-{nonce}",
+        std::process::id()
+    ))
 }
 
 fn config(dimensions: usize) -> IndexConfig {
