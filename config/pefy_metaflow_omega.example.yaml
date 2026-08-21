@@ -49,9 +49,40 @@ memory:
   tenant_isolation: required
   project_isolation: required
   minimum_necessary_context: true
-  semantic_backend: ${PEFY_SEMANTIC_MEMORY_BACKEND:-not-configured}
+  authoritative_record: governed-core-store
+  semantic_backend: omega-vector-rs
   project_vault_backend: ${PEFY_PROJECT_VAULT_BACKEND:-not-configured}
   core_store_backend: ${PEFY_CORE_STORE_BACKEND:-not-configured}
+  duplicate_full_payloads_in_vector_index: false
+  return_evidence_handles_before_full_payloads: true
+  vector_index:
+    engine: omega-vector-rs
+    language: rust
+    rust_toolchain: 1.97.1
+    storage: mmap
+    search_representation: int8-normalized
+    rerank_representation: f16-normalized
+    graph_links: u32-fixed-width
+    external_ids: u64
+    max_neighbors: 12
+    initial_capacity: 4096
+    ef_construction: 96
+    ef_search: 80
+    rerank_candidates: 48
+    query_memory_budget_mb: 8
+    max_results: 12
+    max_excerpt_chars: 1200
+    metadata_in_vector_index: false
+    mmap_prepopulate: false
+    batch_flush: true
+    production_rss_limit_required: true
+    production_cgroup_or_systemd_memory_limit_required: true
+  context_budget:
+    prefer_references_over_payload_duplication: true
+    max_semantic_results: 12
+    max_excerpt_chars_per_result: 1200
+    deduplicate_by_evidence_ref: true
+    hydrate_full_payload_only_when_required: true
 
 model_routing:
   provider_lock_in: false
@@ -101,8 +132,20 @@ consequential_actions:
 observability:
   enabled: true
   redact_secrets: true
+  memory_metrics:
+    - vector_index_count
+    - vector_index_logical_bytes
+    - vector_index_mapped_virtual_bytes
+    - vector_index_bytes_per_vector
+    - vector_query_budget_bytes
+    - process_rss_bytes
+    - page_faults
+    - retrieval_latency_ms
+    - retrieval_recall_at_k
   evidence_events:
     - mission.routed
+    - memory.retrieved
+    - memory.vector.stats
     - council.challenge.completed
     - task.dispatched
     - artifact.produced
@@ -114,6 +157,8 @@ observability:
 continuous_improvement:
   deep_loop_required_for_promotion: true
   benchmark_before_after: true
+  memory_regression_gate: true
+  retrieval_quality_regression_gate: true
   lifecycle:
     - discover
     - assess
