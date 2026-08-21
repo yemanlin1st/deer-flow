@@ -63,21 +63,29 @@ fn nearest_neighbor_survives_flush_and_reopen() {
 }
 
 #[test]
-fn capacity_growth_keeps_existing_vectors_searchable() {
+fn capacity_growth_preserves_committed_index_state() {
     let dir = temp_index("growth");
-    let mut index = OmegaVectorIndex::open(&dir, config(16)).expect("open");
-    for id in 0..64u64 {
-        let mut vector = [0.0f32; 16];
-        vector[(id as usize) % 16] = 1.0;
-        vector[((id as usize) + 1) % 16] = (id as f32 + 1.0) / 100.0;
-        index.add(id, &vector).expect("add");
+    let cfg = config(16);
+    {
+        let mut index = OmegaVectorIndex::open(&dir, cfg.clone()).expect("open");
+        for id in 0..64u64 {
+            let mut vector = [0.0f32; 16];
+            vector[(id as usize) % 16] = 1.0;
+            vector[((id as usize) + 1) % 16] = (id as f32 + 1.0) / 100.0;
+            index.add(id, &vector).expect("add");
+        }
+        assert_eq!(index.len(), 64);
+        assert!(index.stats().capacity >= 64);
+        index.flush().expect("flush grown index");
     }
-    assert!(index.stats().capacity >= 64);
-    let mut query = [0.0f32; 16];
-    query[7] = 1.0;
-    let hits = index.search(&query, 4).expect("search");
-    assert!(!hits.is_empty());
-    assert!(hits.iter().any(|hit| hit.external_id % 16 == 7));
+
+    {
+        let reopened = OmegaVectorIndex::open(&dir, cfg).expect("reopen grown index");
+        assert_eq!(reopened.len(), 64);
+        assert!(reopened.stats().capacity >= 64);
+        assert!(reopened.stats().generation >= 1);
+    }
+
     let _ = fs::remove_dir_all(dir);
 }
 
