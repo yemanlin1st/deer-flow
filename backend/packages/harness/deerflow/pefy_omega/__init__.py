@@ -13,6 +13,11 @@ from .export_filter import (
     render_export_text,
 )
 from .humanize import OutputHygienePolicy, clean_output
+from .memory_budget import (
+    MemoryBudgetPolicy,
+    approximate_context_chars,
+    compact_memory_records,
+)
 from .orchestrator import PefyMetaFlowOrchestrator
 from .policy import (
     ALL_CHALLENGE_FUNCTIONS,
@@ -61,6 +66,7 @@ __all__ = [
     "ExportVisibility",
     "METAFLOW_AGENCY",
     "METAFLOW_AGENT",
+    "MemoryBudgetPolicy",
     "MetadataResolver",
     "MissionContext",
     "Mode",
@@ -74,9 +80,11 @@ __all__ = [
     "TaskNode",
     "VectorHit",
     "VectorStats",
+    "approximate_context_chars",
     "build_execution_waves",
     "burst_smoothing_offsets",
     "clean_output",
+    "compact_memory_records",
     "filter_export_messages",
     "recommended_parallelism",
     "render_export_text",
