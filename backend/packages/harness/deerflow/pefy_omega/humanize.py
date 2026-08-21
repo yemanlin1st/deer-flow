@@ -7,8 +7,8 @@ provenance controls.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+import re
 
 
 _ZERO_WIDTH_RE = re.compile(r"[\u200B-\u200D\u2060\uFEFF]")
