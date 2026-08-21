@@ -200,10 +200,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let memory_after_build = memory_sample_linux();
 
     let mut query_latencies = Vec::with_capacity(bench.queries);
+    let mut total_search_duration = Duration::ZERO;
     let mut recall_hits = 0usize;
     let mut recall_total = 0usize;
 
-    let query_phase_started = Instant::now();
     for query_index in 0..bench.queries {
         let source_id = ((query_index as u64).wrapping_mul(104_729)) % bench.vectors as u64;
         let query = deterministic_vector(source_id, bench.dimensions);
@@ -211,7 +211,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let started = Instant::now();
         let actual = index.search(&query, bench.k)?;
-        query_latencies.push(started.elapsed());
+        let search_elapsed = started.elapsed();
+        total_search_duration += search_elapsed;
+        query_latencies.push(search_elapsed);
 
         for hit in actual {
             if expected.contains(&hit.external_id) {
@@ -220,7 +222,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         recall_total += expected.len();
     }
-    let query_phase_elapsed = query_phase_started.elapsed();
     let memory_after_queries = memory_sample_linux();
     let stats = index.stats();
 
@@ -229,10 +230,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         recall_hits as f64 / recall_total as f64
     };
-    let qps = if query_phase_elapsed.is_zero() {
+    let search_qps = if total_search_duration.is_zero() {
         0.0
     } else {
-        bench.queries as f64 / query_phase_elapsed.as_secs_f64()
+        bench.queries as f64 / total_search_duration.as_secs_f64()
     };
 
     let persisted_bytes = fs::read_dir(&dir)?
@@ -253,10 +254,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  \"rerank_candidates\": {},", bench.rerank_candidates);
     println!("  \"query_memory_budget_mb\": {},", bench.query_memory_budget_mb);
     println!("  \"build_ms\": {},", json_number(duration_ms(build_elapsed)));
-    println!("  \"p50_query_ms\": {},", json_number(percentile_ms(&query_latencies, 0.50)));
-    println!("  \"p95_query_ms\": {},", json_number(percentile_ms(&query_latencies, 0.95)));
-    println!("  \"p99_query_ms\": {},", json_number(percentile_ms(&query_latencies, 0.99)));
-    println!("  \"query_phase_qps_including_ground_truth\": {},", json_number(qps));
+    println!(
+        "  \"p50_query_ms\": {},",
+        json_number(percentile_ms(&query_latencies, 0.50))
+    );
+    println!(
+        "  \"p95_query_ms\": {},",
+        json_number(percentile_ms(&query_latencies, 0.95))
+    );
+    println!(
+        "  \"p99_query_ms\": {},",
+        json_number(percentile_ms(&query_latencies, 0.99))
+    );
+    println!("  \"search_qps\": {},", json_number(search_qps));
     println!("  \"recall_at_k\": {},", json_number(recall_at_k));
     println!("  \"logical_bytes\": {},", stats.logical_bytes);
     println!("  \"mapped_virtual_bytes\": {},", stats.mapped_virtual_bytes);
@@ -267,7 +277,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  \"rss_after_build_kb\": {},", memory_after_build.rss_kb);
     println!("  \"peak_rss_after_build_kb\": {},", memory_after_build.peak_rss_kb);
     println!("  \"rss_after_queries_kb\": {},", memory_after_queries.rss_kb);
-    println!("  \"peak_rss_after_queries_kb\": {}", memory_after_queries.peak_rss_kb);
+    println!(
+        "  \"peak_rss_after_queries_kb\": {}",
+        memory_after_queries.peak_rss_kb
+    );
     println!("}}");
 
     drop(index);
