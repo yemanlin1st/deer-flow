@@ -46,8 +46,15 @@ pub struct PefyVectorHandle {
     index: Mutex<OmegaVectorIndex>,
 }
 
+/// Opens or creates an ΩVECTOR-RS index and returns an opaque handle.
+///
+/// # Safety
+///
+/// `path` must be a valid, readable NUL-terminated C string for the duration
+/// of this call. The returned handle must be closed exactly once with
+/// [`pefy_vector_close`].
 #[unsafe(no_mangle)]
-pub extern "C" fn pefy_vector_open(
+pub unsafe extern "C" fn pefy_vector_open(
     path: *const c_char,
     dimensions: u32,
     max_neighbors: u32,
@@ -61,7 +68,7 @@ pub extern "C" fn pefy_vector_open(
         set_error("path pointer is null");
         return ptr::null_mut();
     }
-    // SAFETY: caller guarantees `path` points to a valid NUL-terminated C string.
+    // SAFETY: required by this function's public safety contract.
     let path = unsafe { CStr::from_ptr(path) };
     let path = match path.to_str() {
         Ok(value) => value,
@@ -92,8 +99,15 @@ pub extern "C" fn pefy_vector_open(
     }
 }
 
+/// Adds one vector to an opened ΩVECTOR-RS index.
+///
+/// # Safety
+///
+/// `handle` must be a live handle returned by [`pefy_vector_open`]. `vector`
+/// must point to at least `dimensions` readable `f32` values. When `out_node`
+/// is non-null it must point to writable `u32` storage.
 #[unsafe(no_mangle)]
-pub extern "C" fn pefy_vector_add(
+pub unsafe extern "C" fn pefy_vector_add(
     handle: *mut PefyVectorHandle,
     external_id: u64,
     vector: *const c_float,
@@ -104,9 +118,9 @@ pub extern "C" fn pefy_vector_add(
         set_error("handle or vector pointer is null");
         return -1;
     }
-    // SAFETY: caller guarantees `vector` has `dimensions` readable f32 values.
+    // SAFETY: required by this function's public safety contract.
     let vector = unsafe { std::slice::from_raw_parts(vector, dimensions) };
-    // SAFETY: non-null handle originated from `pefy_vector_open`.
+    // SAFETY: required by this function's public safety contract.
     let handle = unsafe { &*handle };
     let mut guard = match handle.index.lock() {
         Ok(value) => value,
@@ -118,7 +132,7 @@ pub extern "C" fn pefy_vector_add(
     match guard.add(external_id, vector) {
         Ok(node) => {
             if !out_node.is_null() {
-                // SAFETY: caller supplied a writable u32 output pointer.
+                // SAFETY: required by this function's public safety contract.
                 unsafe { *out_node = node };
             }
             0
@@ -130,8 +144,15 @@ pub extern "C" fn pefy_vector_add(
     }
 }
 
+/// Searches an opened ΩVECTOR-RS index.
+///
+/// # Safety
+///
+/// `handle` must be live. `query` must contain at least `dimensions` readable
+/// `f32` values. `out_ids` and `out_scores` must each reference writable
+/// arrays with at least `out_capacity` entries, and `out_capacity >= k`.
 #[unsafe(no_mangle)]
-pub extern "C" fn pefy_vector_search(
+pub unsafe extern "C" fn pefy_vector_search(
     handle: *const PefyVectorHandle,
     query: *const c_float,
     dimensions: usize,
@@ -148,9 +169,9 @@ pub extern "C" fn pefy_vector_search(
         set_error("search output capacity is smaller than k");
         return -2;
     }
-    // SAFETY: caller guarantees `query` has `dimensions` readable f32 values.
+    // SAFETY: required by this function's public safety contract.
     let query = unsafe { std::slice::from_raw_parts(query, dimensions) };
-    // SAFETY: non-null handle originated from `pefy_vector_open` and remains alive.
+    // SAFETY: required by this function's public safety contract.
     let handle = unsafe { &*handle };
     let guard = match handle.index.lock() {
         Ok(value) => value,
@@ -167,7 +188,8 @@ pub extern "C" fn pefy_vector_search(
         }
     };
     for (offset, hit) in hits.iter().enumerate() {
-        // SAFETY: out_capacity >= k >= hits.len() and pointers are non-null.
+        // SAFETY: required by this function's public safety contract and
+        // `hits.len() <= k <= out_capacity`.
         unsafe {
             *out_ids.add(offset) = hit.external_id;
             *out_scores.add(offset) = hit.score;
@@ -176,8 +198,13 @@ pub extern "C" fn pefy_vector_search(
     hits.len() as isize
 }
 
+/// Marks a vector node as deleted without immediately compacting the index.
+///
+/// # Safety
+///
+/// `handle` must be a live handle returned by [`pefy_vector_open`].
 #[unsafe(no_mangle)]
-pub extern "C" fn pefy_vector_mark_deleted(
+pub unsafe extern "C" fn pefy_vector_mark_deleted(
     handle: *mut PefyVectorHandle,
     node: u32,
 ) -> i32 {
@@ -185,7 +212,7 @@ pub extern "C" fn pefy_vector_mark_deleted(
         set_error("handle pointer is null");
         return -1;
     }
-    // SAFETY: non-null handle originated from `pefy_vector_open`.
+    // SAFETY: required by this function's public safety contract.
     let handle = unsafe { &*handle };
     let mut guard = match handle.index.lock() {
         Ok(value) => value,
@@ -203,13 +230,18 @@ pub extern "C" fn pefy_vector_mark_deleted(
     }
 }
 
+/// Flushes all mapped index structures and advances durable metadata.
+///
+/// # Safety
+///
+/// `handle` must be a live handle returned by [`pefy_vector_open`].
 #[unsafe(no_mangle)]
-pub extern "C" fn pefy_vector_flush(handle: *mut PefyVectorHandle) -> i32 {
+pub unsafe extern "C" fn pefy_vector_flush(handle: *mut PefyVectorHandle) -> i32 {
     if handle.is_null() {
         set_error("handle pointer is null");
         return -1;
     }
-    // SAFETY: non-null handle originated from `pefy_vector_open`.
+    // SAFETY: required by this function's public safety contract.
     let handle = unsafe { &*handle };
     let mut guard = match handle.index.lock() {
         Ok(value) => value,
@@ -227,8 +259,14 @@ pub extern "C" fn pefy_vector_flush(handle: *mut PefyVectorHandle) -> i32 {
     }
 }
 
+/// Copies current index statistics into caller-owned storage.
+///
+/// # Safety
+///
+/// `handle` must be live and `out` must point to writable
+/// [`PefyVectorStats`] storage.
 #[unsafe(no_mangle)]
-pub extern "C" fn pefy_vector_stats(
+pub unsafe extern "C" fn pefy_vector_stats(
     handle: *const PefyVectorHandle,
     out: *mut PefyVectorStats,
 ) -> i32 {
@@ -236,7 +274,7 @@ pub extern "C" fn pefy_vector_stats(
         set_error("stats received a null pointer");
         return -1;
     }
-    // SAFETY: non-null handle originated from `pefy_vector_open`.
+    // SAFETY: required by this function's public safety contract.
     let handle = unsafe { &*handle };
     let guard = match handle.index.lock() {
         Ok(value) => value,
@@ -246,13 +284,19 @@ pub extern "C" fn pefy_vector_stats(
         }
     };
     let stats = PefyVectorStats::from(guard.stats());
-    // SAFETY: caller supplied a writable stats pointer.
+    // SAFETY: required by this function's public safety contract.
     unsafe { *out = stats };
     0
 }
 
+/// Copies the current thread-local error text into a caller-provided buffer.
+///
+/// # Safety
+///
+/// When `buffer` is non-null, it must point to at least `capacity` writable
+/// bytes. Passing a null buffer with zero capacity is allowed to query size.
 #[unsafe(no_mangle)]
-pub extern "C" fn pefy_vector_last_error(buffer: *mut c_char, capacity: usize) -> usize {
+pub unsafe extern "C" fn pefy_vector_last_error(buffer: *mut c_char, capacity: usize) -> usize {
     LAST_ERROR.with(|slot| {
         let message = slot.borrow();
         let bytes = message.as_bytes();
@@ -261,7 +305,7 @@ pub extern "C" fn pefy_vector_last_error(buffer: *mut c_char, capacity: usize) -
             return required;
         }
         let writable = bytes.len().min(capacity.saturating_sub(1));
-        // SAFETY: caller supplied a writable `capacity`-sized byte buffer.
+        // SAFETY: required by this function's public safety contract.
         unsafe {
             ptr::copy_nonoverlapping(bytes.as_ptr(), buffer.cast::<u8>(), writable);
             *buffer.add(writable) = 0;
@@ -270,16 +314,22 @@ pub extern "C" fn pefy_vector_last_error(buffer: *mut c_char, capacity: usize) -
     })
 }
 
+/// Flushes and consumes an ΩVECTOR-RS handle.
+///
+/// # Safety
+///
+/// `handle` must either be null or a live handle returned by
+/// [`pefy_vector_open`] that has not already been passed to this function.
 #[unsafe(no_mangle)]
-pub extern "C" fn pefy_vector_close(handle: *mut PefyVectorHandle) {
+pub unsafe extern "C" fn pefy_vector_close(handle: *mut PefyVectorHandle) {
     if handle.is_null() {
         return;
     }
-    // SAFETY: handle must be consumed exactly once and must originate from open.
+    // SAFETY: required by this function's public safety contract.
     let boxed = unsafe { Box::from_raw(handle) };
-    if let Ok(mut guard) = boxed.index.lock() {
-        if let Err(error) = guard.flush() {
-            set_error(error.to_string());
-        }
+    if let Ok(mut guard) = boxed.index.lock()
+        && let Err(error) = guard.flush()
+    {
+        set_error(error.to_string());
     }
 }
