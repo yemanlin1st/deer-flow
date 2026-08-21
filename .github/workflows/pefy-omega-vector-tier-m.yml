@@ -1,0 +1,127 @@
+name: PEFY ΩVECTOR-RS Tier M Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      dimensions:
+        description: Embedding dimensions
+        required: true
+        default: "384"
+        type: choice
+        options:
+          - "384"
+          - "768"
+      queries:
+        description: Exact-ground-truth query count
+        required: true
+        default: "1000"
+        type: choice
+        options:
+          - "250"
+          - "500"
+          - "1000"
+      profile:
+        description: ΩMEMORY retrieval profile
+        required: true
+        default: BALANCED
+        type: choice
+        options:
+          - EDGE
+          - BALANCED
+          - PRO
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omega-vector-tier-m-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tier-m:
+    name: 100K vector RSS / latency / recall qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pinned Rust toolchain
+        run: >-
+          rustup toolchain install 1.97.1
+          --profile minimal
+          --component rustfmt,clippy
+
+      - name: Resolve ΩMEMORY profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.profile }}" in
+            EDGE)
+              echo 'OMEGA_BENCH_MAX_NEIGHBORS=10' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_EF_CONSTRUCTION=64' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_EF_SEARCH=56' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_RERANK=24' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_QUERY_MEMORY_MB=4' >> "$GITHUB_ENV"
+              ;;
+            BALANCED)
+              echo 'OMEGA_BENCH_MAX_NEIGHBORS=12' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_EF_CONSTRUCTION=96' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_EF_SEARCH=80' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_RERANK=48' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_QUERY_MEMORY_MB=8' >> "$GITHUB_ENV"
+              ;;
+            PRO)
+              echo 'OMEGA_BENCH_MAX_NEIGHBORS=16' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_EF_CONSTRUCTION=160' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_EF_SEARCH=128' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_RERANK=96' >> "$GITHUB_ENV"
+              echo 'OMEGA_BENCH_QUERY_MEMORY_MB=16' >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Unsupported profile: ${{ inputs.profile }}" >&2
+              exit 2
+              ;;
+          esac
+          echo 'OMEGA_BENCH_VECTORS=100000' >> "$GITHUB_ENV"
+          echo 'OMEGA_BENCH_DIMENSIONS=${{ inputs.dimensions }}' >> "$GITHUB_ENV"
+          echo 'OMEGA_BENCH_QUERIES=${{ inputs.queries }}' >> "$GITHUB_ENV"
+          echo 'OMEGA_BENCH_K=10' >> "$GITHUB_ENV"
+
+      - name: Build release benchmark binary
+        run: >-
+          cargo +1.97.1 build --release
+          --manifest-path rust/pefy-vector-rs/Cargo.toml
+          --bin omega-vector-bench
+
+      - name: Execute Tier M qualification
+        run: >-
+          rust/pefy-vector-rs/target/release/omega-vector-bench
+          > omega-vector-tier-m.json
+
+      - name: Validate evidence JSON
+        run: python -m json.tool omega-vector-tier-m.json
+
+      - name: Add run metadata
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("omega-vector-tier-m.json")
+          data = json.loads(path.read_text())
+          data["qualification_tier"] = "M"
+          data["profile"] = "${{ inputs.profile }}"
+          data["git_sha"] = "${{ github.sha }}"
+          data["github_run_id"] = "${{ github.run_id }}"
+          data["production_claim"] = False
+          path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+          PY
+
+      - name: Upload Tier M evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: omega-vector-tier-m-${{ inputs.profile }}-${{ inputs.dimensions }}d
+          path: omega-vector-tier-m.json
+          retention-days: 90
