@@ -74,7 +74,12 @@ fn compact_engine_has_no_f16_payload_and_is_small_at_768_dimensions() {
     let full_f32_payload = dimensions as u64 * 4;
     assert!(stats.approx_bytes_per_vector < full_f32_payload / 2);
     assert!(!dir.join("vectors.f16").exists());
-    assert_eq!(fs::metadata(dir.join("vectors.q8")).expect("q8 metadata").len(), 2 * 768);
+    assert_eq!(
+        fs::metadata(dir.join("vectors.q8"))
+            .expect("q8 metadata")
+            .len(),
+        2 * 768
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
