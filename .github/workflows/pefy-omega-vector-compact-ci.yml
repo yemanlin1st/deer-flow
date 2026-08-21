@@ -1,0 +1,77 @@
+name: PEFY ΩVECTOR-RS Compact CI
+
+on:
+  push:
+    branches:
+      - "feature/pefy-metaflow-omega-*"
+    paths:
+      - "rust/pefy-vector-compact-rs/**"
+      - ".github/workflows/pefy-omega-vector-compact-ci.yml"
+  pull_request:
+    paths:
+      - "rust/pefy-vector-compact-rs/**"
+      - ".github/workflows/pefy-omega-vector-compact-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compact:
+    name: q8-only build / lint / test / benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pinned Rust toolchain
+        run: >-
+          rustup toolchain install 1.97.1
+          --profile minimal
+          --component rustfmt,clippy
+
+      - name: Format temporary working tree
+        run: cargo +1.97.1 fmt --manifest-path rust/pefy-vector-compact-rs/Cargo.toml
+
+      - name: Clippy
+        run: >-
+          cargo +1.97.1 clippy
+          --manifest-path rust/pefy-vector-compact-rs/Cargo.toml
+          --all-targets
+          -- -D warnings
+
+      - name: Unit tests
+        run: >-
+          cargo +1.97.1 test
+          --manifest-path rust/pefy-vector-compact-rs/Cargo.toml
+          --all-targets
+
+      - name: Compact A/B smoke benchmark
+        env:
+          OMEGA_BENCH_VECTORS: "1024"
+          OMEGA_BENCH_DIMENSIONS: "64"
+          OMEGA_BENCH_QUERIES: "12"
+          OMEGA_BENCH_K: "5"
+          OMEGA_BENCH_MAX_NEIGHBORS: "12"
+          OMEGA_BENCH_EF_CONSTRUCTION: "96"
+          OMEGA_BENCH_EF_SEARCH: "80"
+          OMEGA_BENCH_RERANK: "48"
+          OMEGA_BENCH_QUERY_MEMORY_MB: "4"
+        run: >-
+          cargo +1.97.1 run --release
+          --manifest-path rust/pefy-vector-compact-rs/Cargo.toml
+          --bin omega-vector-compact-bench
+          > omega-vector-compact-benchmark.json
+
+      - name: Validate benchmark JSON
+        run: python -m json.tool omega-vector-compact-benchmark.json
+
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: omega-vector-compact-benchmark
+          path: omega-vector-compact-benchmark.json
+          retention-days: 30
+
+      - name: Verify formatted Rust is committed
+        run: git diff --exit-code -- rust/pefy-vector-compact-rs

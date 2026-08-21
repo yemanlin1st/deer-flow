@@ -1,0 +1,149 @@
+name: PEFY ΩVECTOR-RS Same-Runner A-B
+
+on:
+  push:
+    branches:
+      - "feature/pefy-metaflow-omega-*"
+    paths:
+      - "rust/pefy-vector-rs/**"
+      - "rust/pefy-vector-compact-rs/**"
+      - ".github/workflows/pefy-omega-vector-ab-ci.yml"
+  pull_request:
+    paths:
+      - "rust/pefy-vector-rs/**"
+      - "rust/pefy-vector-compact-rs/**"
+      - ".github/workflows/pefy-omega-vector-ab-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ab-gate:
+    name: BALANCED vs COMPACT same-runner evidence gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OMEGA_BENCH_VECTORS: "1024"
+      OMEGA_BENCH_DIMENSIONS: "64"
+      OMEGA_BENCH_QUERIES: "200"
+      OMEGA_BENCH_K: "5"
+      OMEGA_BENCH_MAX_NEIGHBORS: "12"
+      OMEGA_BENCH_EF_CONSTRUCTION: "96"
+      OMEGA_BENCH_EF_SEARCH: "80"
+      OMEGA_BENCH_RERANK: "48"
+      OMEGA_BENCH_QUERY_MEMORY_MB: "4"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+
+      - name: Build both release engines
+        run: |
+          set -euo pipefail
+          cargo +1.97.1 build --release \
+            --manifest-path rust/pefy-vector-rs/Cargo.toml \
+            --bin omega-vector-bench
+          cargo +1.97.1 build --release \
+            --manifest-path rust/pefy-vector-compact-rs/Cargo.toml \
+            --bin omega-vector-compact-bench
+
+      - name: Run BALANCED baseline
+        run: >-
+          rust/pefy-vector-rs/target/release/omega-vector-bench
+          > omega-vector-balanced-ab.json
+
+      - name: Run COMPACT candidate
+        run: >-
+          rust/pefy-vector-compact-rs/target/release/omega-vector-compact-bench
+          > omega-vector-compact-ab.json
+
+      - name: Validate source evidence JSON
+        run: |
+          python -m json.tool omega-vector-balanced-ab.json >/dev/null
+          python -m json.tool omega-vector-compact-ab.json >/dev/null
+
+      - name: Compare and apply EDGE engineering gates
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          balanced = json.loads(Path("omega-vector-balanced-ab.json").read_text())
+          compact = json.loads(Path("omega-vector-compact-ab.json").read_text())
+
+          def ratio(candidate, baseline):
+              return candidate / baseline if baseline else None
+
+          recall_loss = balanced["recall_at_k"] - compact["recall_at_k"]
+          persisted_ratio = ratio(
+              compact["persisted_index_bytes"],
+              balanced["persisted_index_bytes"],
+          )
+          bytes_per_vector_ratio = ratio(
+              compact["approx_bytes_per_vector"],
+              balanced["approx_bytes_per_vector"],
+          )
+          p95_ratio = ratio(compact["p95_query_ms"], balanced["p95_query_ms"])
+          qps_ratio = ratio(compact["search_qps"], balanced["search_qps"])
+
+          gates = {
+              "recall_loss_le_0_05": recall_loss <= 0.05,
+              "persisted_ratio_le_0_65": persisted_ratio is not None and persisted_ratio <= 0.65,
+              "bytes_per_vector_ratio_le_0_65": (
+                  bytes_per_vector_ratio is not None and bytes_per_vector_ratio <= 0.65
+              ),
+              # Tiny smoke timings remain noisy. Record p95 against the stricter
+              # 1.20 target, but do not make it the sole hard-fail criterion here.
+              "p95_ratio_le_1_20_observed": p95_ratio is not None and p95_ratio <= 1.20,
+          }
+          hard_pass = all(
+              gates[name]
+              for name in (
+                  "recall_loss_le_0_05",
+                  "persisted_ratio_le_0_65",
+                  "bytes_per_vector_ratio_le_0_65",
+              )
+          )
+
+          report = {
+              "schema": "pefy.omega.vector.ab.v1",
+              "qualification_tier": "S-SAME-RUNNER",
+              "profile_candidate": "EDGE",
+              "production_claim": False,
+              "balanced": balanced,
+              "compact": compact,
+              "comparison": {
+                  "recall_loss_absolute": recall_loss,
+                  "persisted_bytes_ratio": persisted_ratio,
+                  "bytes_per_vector_ratio": bytes_per_vector_ratio,
+                  "p95_latency_ratio": p95_ratio,
+                  "qps_ratio": qps_ratio,
+              },
+              "gates": gates,
+              "hard_pass": hard_pass,
+              "note": "Latency is recorded but Tier S timing is not a production SLO.",
+          }
+          Path("omega-vector-ab-report.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report["comparison"], indent=2, sort_keys=True))
+          print(json.dumps(gates, indent=2, sort_keys=True))
+          if not hard_pass:
+              raise SystemExit("COMPACT failed same-runner EDGE engineering hard gates")
+          PY
+
+      - name: Validate comparison report
+        run: python -m json.tool omega-vector-ab-report.json
+
+      - name: Upload paired A/B evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: omega-vector-same-runner-ab
+          path: |
+            omega-vector-balanced-ab.json
+            omega-vector-compact-ab.json
+            omega-vector-ab-report.json
+          retention-days: 30
