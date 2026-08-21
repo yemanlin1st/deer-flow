@@ -10,6 +10,7 @@ on:
       - "backend/tests/test_pefy_metaflow_*.py"
       - "config/pefy_metaflow_omega.example.yaml"
       - "rust/pefy-vector-rs/**"
+      - "rust/pefy-vector-compact-rs/**"
       - "skills/public/pefy-metaflow-omega/**"
       - "docs/PEFY_METAFLOW_OMEGA*"
       - "docs/PEFY_OMEGA_MEMORY*"
@@ -48,6 +49,80 @@ jobs:
           backend/tests/test_pefy_metaflow_execution.py
           backend/tests/test_pefy_metaflow_memory.py
           backend/tests/test_pefy_metaflow_vector_profiles.py
+
+  tenant-isolation-ffi:
+    name: BALANCED + COMPACT real FFI tenant-isolation gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+
+      - name: Install test runner
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Build both Rust cdylib engines
+        run: |
+          set -euo pipefail
+          cargo +1.97.1 build --release --lib --manifest-path rust/pefy-vector-rs/Cargo.toml
+          cargo +1.97.1 build --release --lib --manifest-path rust/pefy-vector-compact-rs/Cargo.toml
+
+      - name: Execute real Python to Rust tenant isolation proof
+        env:
+          PYTHONPATH: backend/packages/harness
+          PEFY_VECTOR_BALANCED_LIB: rust/pefy-vector-rs/target/release/libpefy_vector_rs.so
+          PEFY_VECTOR_COMPACT_LIB: rust/pefy-vector-compact-rs/target/release/libpefy_vector_compact_rs.so
+        run: >-
+          python -m pytest -q
+          backend/tests/test_pefy_metaflow_vector_tenant_ffi.py
+          --junitxml=omega-vector-tenant-isolation.xml
+
+      - name: Emit tenant-isolation qualification evidence
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = {
+              "schema": "pefy.omega.vector.tenant-isolation.v1",
+              "commit": os.environ.get("GITHUB_SHA"),
+              "engines": ["OMEGA-VECTOR-RS", "OMEGA-VECTOR-RS-COMPACT"],
+              "real_python_rust_ffi": True,
+              "physical_namespace_per_tenant_project": True,
+              "raw_tenant_project_ids_hidden_from_paths": True,
+              "same_external_id_allowed_across_tenants": True,
+              "post_lookup_tenant_metadata_recheck": True,
+              "post_lookup_project_metadata_recheck": True,
+              "missing_governed_tenant_fails_closed": True,
+              "tenant_isolation_equivalent": True,
+              "qualification_scope": "engineering-ffi-isolation",
+              "production_claim": False,
+          }
+          Path("omega-vector-tenant-isolation.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+
+      - name: Validate isolation evidence JSON
+        run: python -m json.tool omega-vector-tenant-isolation.json
+
+      - name: Upload tenant-isolation evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: omega-vector-tenant-isolation
+          path: |
+            omega-vector-tenant-isolation.json
+            omega-vector-tenant-isolation.xml
+          retention-days: 30
 
   omega-vector-rs:
     name: ΩVECTOR-RS build / lint / test / benchmark
