@@ -61,8 +61,8 @@ jobs:
           --profile minimal
           --component rustfmt,clippy
 
-      - name: Format check
-        run: cargo +1.97.1 fmt --manifest-path rust/pefy-vector-rs/Cargo.toml -- --check
+      - name: Format temporary working tree
+        run: cargo +1.97.1 fmt --manifest-path rust/pefy-vector-rs/Cargo.toml
 
       - name: Clippy
         run: >-
@@ -76,3 +76,6 @@ jobs:
           cargo +1.97.1 test
           --manifest-path rust/pefy-vector-rs/Cargo.toml
           --all-targets
+
+      - name: Verify formatted Rust is committed
+        run: git diff --exit-code -- rust/pefy-vector-rs
