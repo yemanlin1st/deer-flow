@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   targeted-tests:
-    name: Targeted policy / export / scheduling / memory tests
+    name: Targeted policy / export / scheduling / memory / profile tests
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -47,6 +47,7 @@ jobs:
           backend/tests/test_pefy_metaflow_omega.py
           backend/tests/test_pefy_metaflow_execution.py
           backend/tests/test_pefy_metaflow_memory.py
+          backend/tests/test_pefy_metaflow_vector_profiles.py
 
   omega-vector-rs:
     name: ΩVECTOR-RS build / lint / test / benchmark
