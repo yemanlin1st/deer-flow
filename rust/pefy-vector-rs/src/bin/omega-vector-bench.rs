@@ -72,10 +72,7 @@ fn temp_index() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    env::temp_dir().join(format!(
-        "omega-vector-bench-{}-{nonce}",
-        std::process::id()
-    ))
+    env::temp_dir().join(format!("omega-vector-bench-{}-{nonce}", std::process::id()))
 }
 
 fn splitmix64(mut state: u64) -> u64 {
@@ -252,8 +249,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  \"ef_construction\": {},", bench.ef_construction);
     println!("  \"ef_search\": {},", bench.ef_search);
     println!("  \"rerank_candidates\": {},", bench.rerank_candidates);
-    println!("  \"query_memory_budget_mb\": {},", bench.query_memory_budget_mb);
-    println!("  \"build_ms\": {},", json_number(duration_ms(build_elapsed)));
+    println!(
+        "  \"query_memory_budget_mb\": {},",
+        bench.query_memory_budget_mb
+    );
+    println!(
+        "  \"build_ms\": {},",
+        json_number(duration_ms(build_elapsed))
+    );
     println!(
         "  \"p50_query_ms\": {},",
         json_number(percentile_ms(&query_latencies, 0.50))
@@ -269,14 +272,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  \"search_qps\": {},", json_number(search_qps));
     println!("  \"recall_at_k\": {},", json_number(recall_at_k));
     println!("  \"logical_bytes\": {},", stats.logical_bytes);
-    println!("  \"mapped_virtual_bytes\": {},", stats.mapped_virtual_bytes);
-    println!("  \"approx_bytes_per_vector\": {},", stats.approx_bytes_per_vector);
+    println!(
+        "  \"mapped_virtual_bytes\": {},",
+        stats.mapped_virtual_bytes
+    );
+    println!(
+        "  \"approx_bytes_per_vector\": {},",
+        stats.approx_bytes_per_vector
+    );
     println!("  \"persisted_index_bytes\": {},", persisted_bytes);
     println!("  \"rss_before_kb\": {},", memory_before.rss_kb);
     println!("  \"peak_rss_before_kb\": {},", memory_before.peak_rss_kb);
     println!("  \"rss_after_build_kb\": {},", memory_after_build.rss_kb);
-    println!("  \"peak_rss_after_build_kb\": {},", memory_after_build.peak_rss_kb);
-    println!("  \"rss_after_queries_kb\": {},", memory_after_queries.rss_kb);
+    println!(
+        "  \"peak_rss_after_build_kb\": {},",
+        memory_after_build.peak_rss_kb
+    );
+    println!(
+        "  \"rss_after_queries_kb\": {},",
+        memory_after_queries.rss_kb
+    );
     println!(
         "  \"peak_rss_after_queries_kb\": {}",
         memory_after_queries.peak_rss_kb
