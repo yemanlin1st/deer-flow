@@ -1,0 +1,46 @@
+name: PEFY MƐTAFLOW Ω CI
+
+on:
+  push:
+    branches:
+      - "feature/pefy-metaflow-omega-*"
+  pull_request:
+    paths:
+      - "backend/packages/harness/deerflow/pefy_omega/**"
+      - "backend/tests/test_pefy_metaflow_*.py"
+      - "config/pefy_metaflow_omega.example.yaml"
+      - "skills/public/pefy-metaflow-omega/**"
+      - "docs/PEFY_METAFLOW_OMEGA*"
+      - "PEFY_UPSTREAM_NOTICE.md"
+      - ".github/workflows/pefy-metaflow-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-tests:
+    name: Targeted policy / export / scheduling tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test runner
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Compile MƐTAFLOW Ω package
+        run: python -m compileall -q backend/packages/harness/deerflow/pefy_omega
+
+      - name: Run targeted tests
+        env:
+          PYTHONPATH: backend/packages/harness
+        run: >-
+          python -m pytest -q
+          backend/tests/test_pefy_metaflow_omega.py
+          backend/tests/test_pefy_metaflow_execution.py
