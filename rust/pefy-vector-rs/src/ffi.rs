@@ -204,10 +204,7 @@ pub unsafe extern "C" fn pefy_vector_search(
 ///
 /// `handle` must be a live handle returned by [`pefy_vector_open`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pefy_vector_mark_deleted(
-    handle: *mut PefyVectorHandle,
-    node: u32,
-) -> i32 {
+pub unsafe extern "C" fn pefy_vector_mark_deleted(handle: *mut PefyVectorHandle, node: u32) -> i32 {
     if handle.is_null() {
         set_error("handle pointer is null");
         return -1;
