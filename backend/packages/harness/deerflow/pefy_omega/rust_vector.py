@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
-from .policy import MissionContext
+from .policy import MissionContext, ReleaseClass
 
 
 class EmbeddingAdapter(Protocol):
@@ -301,7 +301,40 @@ class OmegaVectorMemoryAdapter:
         self._metadata = metadata
         self._config = config
 
+    @staticmethod
+    def _tenant_context_required(mission: MissionContext) -> bool:
+        return bool(
+            mission.confidential
+            or mission.client_data
+            or mission.release_class
+            in {ReleaseClass.INTERNAL_CONFIDENTIAL, ReleaseClass.RESTRICTED_CLIENT}
+        )
+
+    @classmethod
+    def _assert_mission_scope(cls, mission: MissionContext) -> None:
+        if cls._tenant_context_required(mission) and not (mission.tenant_id or "").strip():
+            raise PermissionError(
+                "tenant_id is required before confidential, restricted or client-scoped vector retrieval"
+            )
+
+    @staticmethod
+    def _assert_record_scope(record: Mapping[str, Any], mission: MissionContext) -> None:
+        if mission.tenant_id:
+            record_tenant = record.get("tenant_id")
+            if record_tenant is None:
+                raise PermissionError("retrieved metadata is missing required tenant_id")
+            if str(record_tenant) != mission.tenant_id:
+                raise PermissionError("retrieved metadata tenant_id does not match mission tenant")
+
+        if mission.project_id:
+            record_project = record.get("project_id")
+            if record_project is None:
+                raise PermissionError("retrieved metadata is missing required project_id")
+            if str(record_project) != mission.project_id:
+                raise PermissionError("retrieved metadata project_id does not match mission project")
+
     def retrieve(self, *, mission: MissionContext, query: str) -> Sequence[Mapping[str, Any]]:
+        self._assert_mission_scope(mission)
         query_vector = self._embedder.embed(query)
         hits = self._index.search(query_vector, self._config.max_results)
         if not hits:
@@ -313,6 +346,7 @@ class OmegaVectorMemoryAdapter:
             record = records.get(hit.external_id)
             if record is None:
                 continue
+            self._assert_record_scope(record, mission)
             compact: dict[str, Any] = {
                 "memory_id": hit.external_id,
                 "score": hit.score,
