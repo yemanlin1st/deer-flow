@@ -1,0 +1,46 @@
+apiVersion: pefy.tech/v1alpha1
+kind: OmegaEdgeConsumer
+metadata:
+  name: metaflow-omega
+  owner: PEFY-GG
+spec:
+  governanceAuthority: GARKAEL-OMEGA
+  profiles: [EDGE-C, EDGE-A, EDGE-F]
+  sovereignOptionalProfile: EDGE-E
+  publicBinding:
+    applicationDirectPublicBindAllowed: false
+    edgeRequired: true
+  preferredDataPlanes:
+    vmContainer: [nginx, haproxy, envoy]
+    kubernetes: [nginx-gateway-fabric, envoy-gateway]
+  traffic:
+    protocols: [http1.1, http2, websocket, sse]
+    conditional: [grpc, http3, quic]
+    boundedRetries: true
+    streamingTimeoutPolicyRequired: true
+  trust:
+    sanitizeClientIdentityHeaders: true
+    privilegedControlPlaneMtls: true
+    adminPrivateByDefault: true
+    toolExecutionPrivateByDefault: true
+    sandboxPrivateByDefault: true
+  protections:
+    rateLimit: differentiated
+    connectionLimit: required
+    requestBodyLimit: required
+    wafWaap: risk-based
+    egressPolicy: required
+    ssrfProtection: required
+  observability:
+    openTelemetry: true
+    requestCorrelation: true
+    secretPayloadLogging: false
+  delivery:
+    canary: supported
+    blueGreen: supported
+    rollback: mandatory
+  release:
+    councilCouncillorReview: all
+    edgeEvidenceRequired: true
+    independentReviewForHighRisk: true
+    productionClaimWithoutEvidenceAllowed: false
