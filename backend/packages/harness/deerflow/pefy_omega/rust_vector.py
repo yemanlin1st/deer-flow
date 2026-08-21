@@ -9,9 +9,10 @@ retrieved IDs.
 from __future__ import annotations
 
 import ctypes
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Protocol
 
 from .policy import MissionContext, ReleaseClass
 
@@ -255,7 +256,7 @@ class RustVectorIndex:
         if self._closed or not self._handle:
             raise RuntimeError("ΩVECTOR-RS index is closed")
 
-    def __enter__(self) -> "RustVectorIndex":
+    def __enter__(self) -> RustVectorIndex:
         self._ensure_open()
         return self
 
