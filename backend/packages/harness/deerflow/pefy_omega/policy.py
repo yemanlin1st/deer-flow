@@ -87,6 +87,8 @@ class MissionContext:
 
     mission_id: str
     objective: str
+    tenant_id: str | None = None
+    project_id: str | None = None
     domains: tuple[str, ...] = ()
     release_class: ReleaseClass = ReleaseClass.PRIVATE_WORKING
     confidential: bool = False
@@ -138,6 +140,7 @@ def route_mission(context: MissionContext) -> RouteDecision:
         ReleaseClass.INTERNAL_CONFIDENTIAL,
         ReleaseClass.RESTRICTED_CLIENT,
     }
+    isolation_required = context.confidential or context.client_data or restricted
 
     reasons: list[str] = []
     gates: list[str] = [
@@ -165,11 +168,20 @@ def route_mission(context: MissionContext) -> RouteDecision:
         evidence.extend(["approval-record", "rollback-evidence", "audit-event"])
         if not context.owner_approved_consequential_actions:
             blocked.extend(sorted(consequential))
-    elif context.confidential or context.client_data or restricted:
+    elif isolation_required:
         mode = Mode.SOVEREIGN
         reasons.append("confidential or restricted information")
-        gates.extend(["tenant-isolation", "minimum-necessary-context", "private-runtime-preference"])
-        evidence.append("data-classification-record")
+        gates.extend(
+            [
+                "tenant-isolation",
+                "tenant-context",
+                "minimum-necessary-context",
+                "private-runtime-preference",
+            ]
+        )
+        evidence.extend(["data-classification-record", "tenant-context-record"])
+        if not context.tenant_id:
+            reasons.append("tenant context required before governed execution")
     elif high_risk_domain:
         mode = Mode.ULTRA
         reasons.append("high-risk domain")
