@@ -9,8 +9,10 @@ on:
       - "backend/packages/harness/deerflow/pefy_omega/**"
       - "backend/tests/test_pefy_metaflow_*.py"
       - "config/pefy_metaflow_omega.example.yaml"
+      - "rust/pefy-vector-rs/**"
       - "skills/public/pefy-metaflow-omega/**"
       - "docs/PEFY_METAFLOW_OMEGA*"
+      - "docs/PEFY_OMEGA_MEMORY*"
       - "PEFY_UPSTREAM_NOTICE.md"
       - ".github/workflows/pefy-metaflow-ci.yml"
 
@@ -44,3 +46,33 @@ jobs:
           python -m pytest -q
           backend/tests/test_pefy_metaflow_omega.py
           backend/tests/test_pefy_metaflow_execution.py
+
+  omega-vector-rs:
+    name: ΩVECTOR-RS build / lint / test
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        run: >-
+          rustup toolchain install 1.97.1
+          --profile minimal
+          --component rustfmt,clippy
+
+      - name: Format check
+        run: cargo +1.97.1 fmt --manifest-path rust/pefy-vector-rs/Cargo.toml -- --check
+
+      - name: Clippy
+        run: >-
+          cargo +1.97.1 clippy
+          --manifest-path rust/pefy-vector-rs/Cargo.toml
+          --all-targets
+          -- -D warnings
+
+      - name: Unit tests
+        run: >-
+          cargo +1.97.1 test
+          --manifest-path rust/pefy-vector-rs/Cargo.toml
+          --all-targets
