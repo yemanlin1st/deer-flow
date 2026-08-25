@@ -11,8 +11,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { urlOfArtifact } from "@/core/artifacts/utils";
+import { useAuth } from "@/core/auth/AuthProvider";
 import { useI18n } from "@/core/i18n/hooks";
-import { installSkill } from "@/core/skills/api";
+import { installSkill, SkillRequestError } from "@/core/skills/api";
 import {
   getFileExtensionDisplayName,
   getFileIcon,
@@ -32,6 +33,8 @@ export function ArtifactFileList({
   threadId: string;
 }) {
   const { t } = useI18n();
+  const { user } = useAuth();
+  const isAdmin = user?.system_role === "admin";
   const { select: selectArtifact, setOpen } = useArtifacts();
   const [installingFile, setInstallingFile] = useState<string | null>(null);
 
@@ -63,12 +66,16 @@ export function ArtifactFileList({
         }
       } catch (error) {
         console.error("Failed to install skill:", error);
-        toast.error("Failed to install skill");
+        if (error instanceof SkillRequestError && error.isAdminRequired) {
+          toast.error(t.settings.skills.installAdminRequired);
+        } else {
+          toast.error("Failed to install skill");
+        }
       } finally {
         setInstallingFile(null);
       }
     },
-    [threadId, installingFile],
+    [threadId, installingFile, t],
   );
 
   return (
@@ -79,18 +86,18 @@ export function ArtifactFileList({
           className="relative cursor-pointer p-3"
           onClick={() => handleClick(file)}
         >
-          <CardHeader className="pr-2 pl-1">
-            <CardTitle className="relative pl-8">
-              <div>{getFileName(file)}</div>
+          <CardHeader className="grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 pr-2 pl-1">
+            <CardTitle className="relative min-w-0 pl-8 leading-tight [overflow-wrap:anywhere] break-words">
+              <div className="min-w-0">{getFileName(file)}</div>
               <div className="absolute top-2 -left-0.5">
                 {getFileIcon(file, "size-6")}
               </div>
             </CardTitle>
-            <CardDescription className="pl-8 text-xs">
+            <CardDescription className="min-w-0 pl-8 text-xs">
               {getFileExtensionDisplayName(file)} file
             </CardDescription>
-            <CardAction>
-              {file.endsWith(".skill") && (
+            <CardAction className="row-span-1 self-center">
+              {file.endsWith(".skill") && isAdmin && (
                 <Button
                   variant="ghost"
                   disabled={installingFile === file}
@@ -104,20 +111,21 @@ export function ArtifactFileList({
                   {t.common.install}
                 </Button>
               )}
-              <a
-                href={urlOfArtifact({
-                  filepath: file,
-                  threadId: threadId,
-                  download: true,
-                })}
-                target="_blank"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Button variant="ghost">
+              <Button variant="ghost" asChild>
+                <a
+                  href={urlOfArtifact({
+                    filepath: file,
+                    threadId: threadId,
+                    download: true,
+                  })}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <DownloadIcon className="size-4" />
                   {t.common.download}
-                </Button>
-              </a>
+                </a>
+              </Button>
             </CardAction>
           </CardHeader>
         </Card>

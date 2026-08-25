@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 ContextSizeType = Literal["fraction", "tokens", "messages"]
+DEFAULT_SKILL_FILE_READ_TOOL_NAMES: tuple[str, ...] = ("read_file", "read", "view", "cat")
 
 
 class ContextSize(BaseModel):
@@ -27,7 +28,10 @@ class SummarizationConfig(BaseModel):
     )
     model_name: str | None = Field(
         default=None,
-        description="Model name to use for summarization (None = use a lightweight model)",
+        description="Model name to use for summarization. None = summarize with the model the run "
+        "actually executes with (the lead run's model, a subagent's own model, or a thread's "
+        "custom-agent model), not config.models[0]. When set, that model generates and the run's "
+        "own model is used as a fallback if the configured summary provider fails.",
     )
     trigger: ContextSize | list[ContextSize] | None = Field(
         default=None,
@@ -50,6 +54,10 @@ class SummarizationConfig(BaseModel):
     summary_prompt: str | None = Field(
         default=None,
         description="Custom prompt template for generating summaries. If not provided, uses the default LangChain prompt.",
+    )
+    skill_file_read_tool_names: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_SKILL_FILE_READ_TOOL_NAMES),
+        description="Tool names treated as skill-file reads when capturing loaded skills into the durable skill_context channel.",
     )
 
 

@@ -1,14 +1,21 @@
 """Tests for deerflow.uploads.manager — shared upload management logic."""
 
+import errno
+import os
+from unittest.mock import patch
+
 import pytest
 
 from deerflow.uploads.manager import (
     PathTraversalError,
+    UnsafeUploadPathError,
     claim_unique_filename,
+    cleanup_stale_upload_staging_files,
     delete_file_safe,
     list_files_in_dir,
     normalize_filename,
     validate_path_traversal,
+    write_upload_file_no_symlink,
 )
 
 # ---------------------------------------------------------------------------
@@ -87,9 +94,67 @@ class TestValidatePathTraversal:
         target = tmp_path.parent / "secret.txt"
         target.touch()
         link = tmp_path / "escape"
-        link.symlink_to(target)
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                pytest.skip("symlink creation requires Developer Mode or elevated privileges on Windows")
+            raise
         with pytest.raises(PathTraversalError, match="traversal"):
             validate_path_traversal(link, tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# write_upload_file_no_symlink
+# ---------------------------------------------------------------------------
+
+
+class TestWriteUploadFileNoSymlink:
+    def test_writes_new_file(self, tmp_path):
+        dest = write_upload_file_no_symlink(tmp_path, "notes.txt", b"hello")
+
+        assert dest == tmp_path / "notes.txt"
+        assert dest.read_bytes() == b"hello"
+
+    def test_overwrites_existing_regular_file_with_single_link(self, tmp_path):
+        dest = tmp_path / "notes.txt"
+        dest.write_bytes(b"old contents")
+        assert os.stat(dest).st_nlink == 1
+
+        result = write_upload_file_no_symlink(tmp_path, "notes.txt", b"new contents")
+
+        assert result == dest
+        assert dest.read_bytes() == b"new contents"
+        assert os.stat(dest).st_nlink == 1
+
+    def test_fallback_without_no_follow_support_succeeds(self, tmp_path, monkeypatch):
+        monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+
+        # When O_NOFOLLOW is absent (Windows), the function falls back to
+        # a dual-lstat + fstat approach and succeeds.
+        result = write_upload_file_no_symlink(tmp_path, "notes.txt", b"hello")
+        assert result == tmp_path / "notes.txt"
+        assert (tmp_path / "notes.txt").read_bytes() == b"hello"
+
+    def test_open_uses_nonblocking_flag_when_available(self, tmp_path):
+        if not hasattr(os, "O_NONBLOCK"):
+            pytest.skip("O_NONBLOCK not available on this platform")
+        with patch("deerflow.uploads.manager.os.open", side_effect=OSError(errno.ENXIO, "no reader")) as open_mock:
+            with pytest.raises(UnsafeUploadPathError, match="Unsafe upload destination"):
+                write_upload_file_no_symlink(tmp_path, "pipe.txt", b"hello")
+
+        flags = open_mock.call_args.args[1]
+        assert flags & os.O_NONBLOCK
+
+    @pytest.mark.parametrize("open_errno", [errno.ENXIO, errno.EAGAIN])
+    def test_nonblocking_special_file_open_errors_are_unsafe(self, tmp_path, open_errno):
+        if not hasattr(os, "O_NONBLOCK"):
+            pytest.skip("O_NONBLOCK not available on this platform")
+        with patch("deerflow.uploads.manager.os.open", side_effect=OSError(open_errno, "would block")):
+            with pytest.raises(UnsafeUploadPathError, match="Unsafe upload destination"):
+                write_upload_file_no_symlink(tmp_path, "pipe.txt", b"hello")
+
+        assert not (tmp_path / "pipe.txt").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +187,49 @@ class TestListFilesInDir:
         result = list_files_in_dir(tmp_path)
         assert result["count"] == 1
         assert result["files"][0]["filename"] == "file.txt"
+
+    def test_filters_only_upload_staging_files(self, tmp_path):
+        (tmp_path / ".env").write_text("intentional dotfile")
+        (tmp_path / ".upload-active.part").write_text("partial")
+        (tmp_path / ".upload-note.txt").write_text("intentional upload")
+        (tmp_path / "draft.part").write_text("intentional upload")
+        (tmp_path / "visible.txt").write_text("visible")
+
+        result = list_files_in_dir(tmp_path)
+
+        assert result["count"] == 4
+        assert [f["filename"] for f in result["files"]] == [".env", ".upload-note.txt", "draft.part", "visible.txt"]
+
+
+# ---------------------------------------------------------------------------
+# cleanup_stale_upload_staging_files
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupStaleUploadStagingFiles:
+    def test_removes_only_stale_staging_files_from_all_upload_layouts(self, tmp_path):
+        legacy_uploads = tmp_path / "threads" / "thread-legacy" / "user-data" / "uploads"
+        user_uploads = tmp_path / "users" / "owner-1" / "threads" / "thread-owned" / "user-data" / "uploads"
+        unrelated_uploads = tmp_path / "misc" / "thread-other" / "user-data" / "uploads"
+        for uploads_dir in (legacy_uploads, user_uploads, unrelated_uploads):
+            uploads_dir.mkdir(parents=True)
+
+        (legacy_uploads / ".upload-old.part").write_text("legacy partial")
+        (user_uploads / ".upload-new.part").write_text("user partial")
+        (unrelated_uploads / ".upload-ignore.part").write_text("outside layout")
+        (legacy_uploads / ".env").write_text("intentional dotfile")
+        (legacy_uploads / ".upload-note.txt").write_text("intentional upload")
+        (legacy_uploads / "draft.part").write_text("intentional upload")
+
+        removed = cleanup_stale_upload_staging_files(tmp_path)
+
+        assert removed == 2
+        assert not (legacy_uploads / ".upload-old.part").exists()
+        assert not (user_uploads / ".upload-new.part").exists()
+        assert (unrelated_uploads / ".upload-ignore.part").exists()
+        assert (legacy_uploads / ".env").exists()
+        assert (legacy_uploads / ".upload-note.txt").exists()
+        assert (legacy_uploads / "draft.part").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -86,9 +86,7 @@ def _with_reasoning_content(
     additional_kwargs = dict(message.additional_kwargs)
     if preserve_whitespace:
         existing = additional_kwargs.get("reasoning_content")
-        additional_kwargs["reasoning_content"] = (
-            f"{existing}{reasoning}" if isinstance(existing, str) else reasoning
-        )
+        additional_kwargs["reasoning_content"] = f"{existing}{reasoning}" if isinstance(existing, str) else reasoning
     else:
         additional_kwargs["reasoning_content"] = _merge_reasoning(
             additional_kwargs.get("reasoning_content"),
@@ -116,7 +114,26 @@ class PatchedChatMiniMax(ChatOpenAI):
             }
         else:
             payload["extra_body"] = {"reasoning_split": True}
+        self._strip_user_message_names(payload)
         return payload
+
+    @staticmethod
+    def _strip_user_message_names(payload: dict) -> None:
+        """Drop the per-message ``name`` field from user-role messages.
+
+        DeerFlow middlewares tag user messages with internal provenance names
+        (``user-input``, ``summary``, ``loop_warning``, ...). ``langchain_openai``
+        serializes those into the OpenAI-compatible request, but MiniMax requires
+        every user-role ``name`` to be identical and otherwise rejects the request
+        with ``invalid params, user name must be consistent (2013)``. MiniMax does
+        not use the per-message author name, so strip it.
+        """
+        messages = payload.get("messages")
+        if not isinstance(messages, list):
+            return
+        for message in messages:
+            if isinstance(message, dict) and message.get("role") == "user":
+                message.pop("name", None)
 
     def _convert_chunk_to_generation_chunk(
         self,
@@ -129,11 +146,7 @@ class PatchedChatMiniMax(ChatOpenAI):
 
         token_usage = chunk.get("usage")
         choices = chunk.get("choices", []) or chunk.get("chunk", {}).get("choices", [])
-        usage_metadata = (
-            _create_usage_metadata(token_usage, chunk.get("service_tier"))
-            if token_usage
-            else None
-        )
+        usage_metadata = _create_usage_metadata(token_usage, chunk.get("service_tier")) if token_usage else None
 
         if len(choices) == 0:
             generation_chunk = ChatGenerationChunk(
