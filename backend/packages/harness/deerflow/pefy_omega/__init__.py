@@ -29,6 +29,12 @@ from .policy import (
     RouteDecision,
     route_mission,
 )
+from .ragflow_adapter import (
+    PefyRagflowMemoryAdapter,
+    RagflowConnection,
+    RagflowRetrievalPolicy,
+    StaticRagflowDatasetResolver,
+)
 from .registry import (
     METAFLOW_AGENCY,
     METAFLOW_AGENT,
@@ -73,10 +79,14 @@ __all__ = [
     "OmegaVectorMemoryAdapter",
     "OutputHygienePolicy",
     "PefyMetaFlowOrchestrator",
+    "PefyRagflowMemoryAdapter",
+    "RagflowConnection",
+    "RagflowRetrievalPolicy",
     "ReleaseClass",
     "RouteDecision",
     "RustVectorConfig",
     "RustVectorIndex",
+    "StaticRagflowDatasetResolver",
     "TaskNode",
     "VectorHit",
     "VectorStats",
