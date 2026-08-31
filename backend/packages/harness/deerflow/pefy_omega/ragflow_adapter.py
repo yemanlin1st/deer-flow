@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from .policy import MissionContext
@@ -35,8 +36,17 @@ class RagflowConnection:
         base = self.base_url.strip().rstrip("/")
         if not base:
             raise ValueError("RAGFlow base_url must not be empty")
-        if not base.startswith(("https://", "http://")):
-            raise ValueError("RAGFlow base_url must use http(s)")
+
+        parsed = urlsplit(base)
+        if parsed.scheme.lower() != "https":
+            raise ValueError("RAGFlow base_url must use HTTPS")
+        if not parsed.hostname:
+            raise ValueError("RAGFlow base_url must include a hostname")
+        if parsed.username or parsed.password:
+            raise ValueError("RAGFlow base_url must not embed credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("RAGFlow base_url must not include query or fragment components")
+
         path = self.retrieval_path.strip()
         if not path.startswith("/"):
             path = f"/{path}"
