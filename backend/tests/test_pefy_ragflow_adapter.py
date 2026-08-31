@@ -59,6 +59,15 @@ def _adapter(
     )
 
 
+def test_connection_requires_https_and_rejects_embedded_url_state() -> None:
+    with pytest.raises(ValueError, match="HTTPS"):
+        RagflowConnection(base_url="http://ragflow.internal").endpoint()
+    with pytest.raises(ValueError, match="credentials"):
+        RagflowConnection(base_url="https://user:pass@ragflow.internal").endpoint()
+    with pytest.raises(ValueError, match="query or fragment"):
+        RagflowConnection(base_url="https://ragflow.internal?x=1").endpoint()
+
+
 def test_requires_tenant_before_external_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = _adapter(monkeypatch, response={"code": 0, "data": {"chunks": []}})
 
