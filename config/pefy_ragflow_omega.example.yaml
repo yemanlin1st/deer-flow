@@ -4,6 +4,8 @@
 ragflow:
   admission_status: engineering_candidate
   reference_version: "0.27.1"
+  reference_commit: "b9df87c4c75a5b0d35c90d15329fc0f6f91cb73e"
+  upstream_lock: "config/ragflow_upstream.lock.json"
   endpoint: "https://ragflow.internal.example"
   api_key_env: "RAGFLOW_API_KEY"
   retrieval_path: "/api/v1/retrieval"
@@ -28,6 +30,9 @@ ragflow:
     vector_similarity_weight: 0.30
     top_k: 64
     timeout_seconds: 12
+    max_response_bytes: 2000000
+    max_query_chars: 8000
+    max_datasets: 16
 
   dataset_mapping_examples:
     # Runtime mappings belong in the approved configuration/secret plane.
@@ -41,6 +46,9 @@ ragflow:
 
   hardening:
     pin_release_and_digest: true
+    exact_upstream_commit_required: true
+    reject_http_redirects: true
+    bounded_response_required: true
     sbom_required: true
     vulnerability_scan_required: true
     secret_scan_required: true
