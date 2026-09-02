@@ -8,20 +8,28 @@ any request, then re-checked against every returned chunk before hydration.
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .policy import MissionContext
 
 RagflowTransport = Callable[
-    [str, Mapping[str, str], Mapping[str, Any], float],
+    [str, Mapping[str, str], Mapping[str, Any], float, int],
     Mapping[str, Any],
 ]
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    """Do not forward the RAGFlow bearer token across HTTP redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        raise RuntimeError("RAGFlow HTTP redirect blocked")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,24 +72,42 @@ class RagflowRetrievalPolicy:
     vector_similarity_weight: float = 0.30
     top_k: int = 64
     timeout_seconds: float = 12.0
+    max_response_bytes: int = 2_000_000
+    max_query_chars: int = 8_000
+    max_datasets: int = 16
     require_tenant: bool = True
     allow_tenant_fallback_for_project: bool = False
 
     def validate(self) -> None:
-        if self.max_chunks <= 0:
-            raise ValueError("max_chunks must be positive")
-        if self.max_chunk_chars <= 0:
-            raise ValueError("max_chunk_chars must be positive")
-        if self.page_size <= 0:
-            raise ValueError("page_size must be positive")
+        positive = {
+            "max_chunks": self.max_chunks,
+            "max_chunk_chars": self.max_chunk_chars,
+            "page_size": self.page_size,
+            "top_k": self.top_k,
+            "timeout_seconds": self.timeout_seconds,
+            "max_response_bytes": self.max_response_bytes,
+            "max_query_chars": self.max_query_chars,
+            "max_datasets": self.max_datasets,
+        }
+        invalid = [name for name, value in positive.items() if value <= 0]
+        if invalid:
+            raise ValueError(f"RAGFlow retrieval policy values must be positive: {invalid}")
         if not 0 <= self.similarity_threshold <= 1:
             raise ValueError("similarity_threshold must be between 0 and 1")
         if not 0 <= self.vector_similarity_weight <= 1:
             raise ValueError("vector_similarity_weight must be between 0 and 1")
-        if self.top_k <= 0:
-            raise ValueError("top_k must be positive")
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        if self.page_size > 100:
+            raise ValueError("page_size must not exceed 100")
+        if self.top_k > 4096:
+            raise ValueError("top_k must not exceed 4096")
+        if self.timeout_seconds > 60:
+            raise ValueError("timeout_seconds must not exceed 60")
+        if self.max_response_bytes > 16_000_000:
+            raise ValueError("max_response_bytes must not exceed 16 MB")
+        if self.max_query_chars > 32_000:
+            raise ValueError("max_query_chars must not exceed 32000")
+        if self.max_datasets > 64:
+            raise ValueError("max_datasets must not exceed 64")
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,18 +148,30 @@ def _default_transport(
     headers: Mapping[str, str],
     payload: Mapping[str, Any],
     timeout_seconds: float,
+    max_response_bytes: int,
 ) -> Mapping[str, Any]:
     request = Request(
         endpoint,
-        data=json.dumps(dict(payload)).encode("utf-8"),
+        data=json.dumps(dict(payload), separators=(",", ":")).encode("utf-8"),
         headers=dict(headers),
         method="POST",
     )
+    opener = build_opener(_RejectRedirects())
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
-            raw = response.read()
+        with opener.open(request, timeout=timeout_seconds) as response:
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                try:
+                    if int(content_length) > max_response_bytes:
+                        raise RuntimeError("RAGFlow response exceeds configured byte limit")
+                except ValueError:
+                    pass
+            raw = response.read(max_response_bytes + 1)
     except (HTTPError, URLError, TimeoutError) as exc:
         raise RuntimeError("RAGFlow retrieval transport failed") from exc
+
+    if len(raw) > max_response_bytes:
+        raise RuntimeError("RAGFlow response exceeds configured byte limit")
 
     try:
         parsed = json.loads(raw.decode("utf-8"))
@@ -144,11 +182,19 @@ def _default_transport(
     return parsed
 
 
-def _number(value: Any, default: float = 0.0) -> float:
+def _score(value: Any) -> float:
     try:
-        return float(value)
+        score = float(value)
     except (TypeError, ValueError):
-        return default
+        return 0.0
+    if not math.isfinite(score):
+        return 0.0
+    return score
+
+
+def _safe_message(value: Any, limit: int = 240) -> str:
+    text = "".join(ch for ch in str(value or "") if ch.isprintable())
+    return text[:limit] or "retrieval failed"
 
 
 class PefyRagflowMemoryAdapter:
@@ -191,10 +237,14 @@ class PefyRagflowMemoryAdapter:
         dataset_ids = self._resolver.resolve(mission)
         if not dataset_ids:
             return ()
+        if len(dataset_ids) > self._policy.max_datasets:
+            raise PermissionError("authorized RAGFlow dataset scope exceeds configured maximum")
 
         question = query.strip()
         if not question:
             return ()
+        if len(question) > self._policy.max_query_chars:
+            raise ValueError("RAGFlow retrieval query exceeds configured character limit")
 
         payload: dict[str, Any] = {
             "question": question,
@@ -205,18 +255,17 @@ class PefyRagflowMemoryAdapter:
             "vector_similarity_weight": self._policy.vector_similarity_weight,
             "top_k": self._policy.top_k,
             "keyword": False,
-            "highlight": False,
         }
         response = self._transport(
             self._connection.endpoint(),
             self._headers(),
             payload,
             self._policy.timeout_seconds,
+            self._policy.max_response_bytes,
         )
 
         if response.get("code") != 0:
-            message = str(response.get("message") or "retrieval failed")[:240]
-            raise RuntimeError(f"RAGFlow retrieval rejected: {message}")
+            raise RuntimeError(f"RAGFlow retrieval rejected: {_safe_message(response.get('message'))}")
 
         data = response.get("data") or {}
         if not isinstance(data, Mapping):
@@ -251,7 +300,7 @@ class PefyRagflowMemoryAdapter:
                     "project_id": project_id,
                     "classification": "retrieved_external_context",
                     "source_type": "ragflow",
-                    "relevance_score": _number(chunk.get("similarity")),
+                    "relevance_score": _score(chunk.get("similarity")),
                     "validation_state": "retrieved_unverified",
                     "dataset_id": returned_dataset,
                     "document_id": str(chunk.get("document_id") or ""),
