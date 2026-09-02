@@ -1,0 +1,29 @@
+{
+  "schema": "pefy.ragflow.upstream-lock.v1",
+  "repository": "infiniflow/ragflow",
+  "license": "Apache-2.0",
+  "release": {
+    "tag": "v0.27.1",
+    "published_at": "2026-08-28T04:10:07Z",
+    "commit_sha": "b9df87c4c75a5b0d35c90d15329fc0f6f91cb73e",
+    "commit_signature_verified": true
+  },
+  "qualification": {
+    "admission_status": "engineering_candidate",
+    "allowed_phase": "retrieval_only_controlled_ingestion",
+    "production_approved": false,
+    "upgrade_requires_requalification": true,
+    "known_open_upstream_issue_refs": [
+      "infiniflow/ragflow#19004",
+      "infiniflow/ragflow#19054"
+    ]
+  },
+  "controls": {
+    "exact_tag_required": true,
+    "exact_commit_required": true,
+    "container_digest_required_before_deploy": true,
+    "sbom_required_before_deploy": true,
+    "vulnerability_scan_required_before_deploy": true,
+    "license_notice_required_for_upstream_derived_distribution": true
+  }
+}

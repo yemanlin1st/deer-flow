@@ -1,0 +1,69 @@
+name: PEFY RAGFlow Ω Live Lab Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: Non-sensitive retrieval query for the lab dataset
+        required: true
+        default: "PEFY RAGFlow qualification retrieval probe"
+        type: string
+      minimum_records:
+        description: Minimum records required for a successful live probe
+        required: true
+        default: "1"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  live-retrieval:
+    name: Non-mutating live retrieval qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      RAGFLOW_LAB_BASE_URL: ${{ secrets.RAGFLOW_LAB_BASE_URL }}
+      RAGFLOW_API_KEY: ${{ secrets.RAGFLOW_LAB_API_KEY }}
+      RAGFLOW_LAB_DATASET_ID: ${{ secrets.RAGFLOW_LAB_DATASET_ID }}
+      RAGFLOW_LAB_TENANT_ID: ${{ secrets.RAGFLOW_LAB_TENANT_ID }}
+      RAGFLOW_LAB_PROJECT_ID: ${{ secrets.RAGFLOW_LAB_PROJECT_ID }}
+      RAGFLOW_LAB_QUERY: ${{ inputs.query }}
+      RAGFLOW_LAB_MIN_RECORDS: ${{ inputs.minimum_records }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate lab secret bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RAGFLOW_LAB_BASE_URL:-}" || { echo "RAGFLOW_LAB_BASE_URL is not configured"; exit 1; }
+          test -n "${RAGFLOW_API_KEY:-}" || { echo "RAGFLOW_LAB_API_KEY is not configured"; exit 1; }
+          test -n "${RAGFLOW_LAB_DATASET_ID:-}" || { echo "RAGFLOW_LAB_DATASET_ID is not configured"; exit 1; }
+
+      - name: Compile PEFY Omega package and live probe
+        run: |
+          python -m compileall -q backend/packages/harness/deerflow/pefy_omega
+          python -m py_compile scripts/qualify_pefy_ragflow_live.py
+
+      - name: Execute live RAGFlow retrieval gate
+        env:
+          PYTHONPATH: backend/packages/harness
+        run: python scripts/qualify_pefy_ragflow_live.py
+
+      - name: Validate evidence JSON
+        run: python -m json.tool pefy-ragflow-live-lab-qualification.json
+
+      - name: Upload live qualification evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: pefy-ragflow-live-lab-qualification
+          path: pefy-ragflow-live-lab-qualification.json
+          retention-days: 30
