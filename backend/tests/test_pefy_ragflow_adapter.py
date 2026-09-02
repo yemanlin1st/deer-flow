@@ -38,6 +38,7 @@ def _adapter(
         headers: Mapping[str, str],
         payload: Mapping[str, Any],
         timeout_seconds: float,
+        max_response_bytes: int,
     ) -> Mapping[str, Any]:
         if captured is not None:
             captured.update(
@@ -45,6 +46,7 @@ def _adapter(
                 headers=dict(headers),
                 payload=dict(payload),
                 timeout_seconds=timeout_seconds,
+                max_response_bytes=max_response_bytes,
             )
         return response
 
@@ -66,6 +68,21 @@ def test_connection_requires_https_and_rejects_embedded_url_state() -> None:
         RagflowConnection(base_url="https://user:pass@ragflow.internal").endpoint()
     with pytest.raises(ValueError, match="query or fragment"):
         RagflowConnection(base_url="https://ragflow.internal?x=1").endpoint()
+
+
+def test_policy_rejects_excessive_limits() -> None:
+    with pytest.raises(ValueError, match="page_size"):
+        RagflowRetrievalPolicy(page_size=101).validate()
+    with pytest.raises(ValueError, match="top_k"):
+        RagflowRetrievalPolicy(top_k=4097).validate()
+    with pytest.raises(ValueError, match="60"):
+        RagflowRetrievalPolicy(timeout_seconds=61).validate()
+    with pytest.raises(ValueError, match="16 MB"):
+        RagflowRetrievalPolicy(max_response_bytes=16_000_001).validate()
+    with pytest.raises(ValueError, match="32000"):
+        RagflowRetrievalPolicy(max_query_chars=32_001).validate()
+    with pytest.raises(ValueError, match="64"):
+        RagflowRetrievalPolicy(max_datasets=65).validate()
 
 
 def test_requires_tenant_before_external_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -103,6 +120,8 @@ def test_project_dataset_is_resolved_locally_and_sent_to_ragflow(
 
     assert captured["payload"]["dataset_ids"] == ["dataset-project-a"]
     assert captured["payload"]["question"] == "governed question"
+    assert "highlight" not in captured["payload"]
+    assert captured["max_response_bytes"] == 2_000_000
     assert records[0]["tenant_id"] == "tenant-a"
     assert records[0]["project_id"] == "project-a"
     assert records[0]["dataset_id"] == "dataset-project-a"
@@ -126,6 +145,37 @@ def test_project_scope_does_not_fall_back_to_tenant_by_default(
     records = adapter.retrieve(mission=_mission(), query="context")
 
     assert records == ()
+    assert captured == {}
+
+
+def test_excessive_authorized_dataset_scope_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    resolver = StaticRagflowDatasetResolver(
+        project_datasets={
+            ("tenant-a", "project-a"): tuple(f"dataset-{index}" for index in range(3))
+        }
+    )
+    adapter = _adapter(
+        monkeypatch,
+        response={"code": 0, "data": {"chunks": []}},
+        resolver=resolver,
+        policy=RagflowRetrievalPolicy(max_datasets=2),
+    )
+
+    with pytest.raises(PermissionError, match="dataset scope"):
+        adapter.retrieve(mission=_mission(), query="context")
+
+
+def test_oversized_query_is_rejected_before_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    adapter = _adapter(
+        monkeypatch,
+        response={"code": 0, "data": {"chunks": []}},
+        policy=RagflowRetrievalPolicy(max_query_chars=5),
+        captured=captured,
+    )
+
+    with pytest.raises(ValueError, match="character limit"):
+        adapter.retrieve(mission=_mission(), query="123456")
     assert captured == {}
 
 
@@ -192,13 +242,35 @@ def test_context_is_bounded_and_vectors_or_arbitrary_metadata_are_not_hydrated(
     assert "sensitive_untrusted_metadata" not in records[0]
 
 
-def test_ragflow_application_error_is_not_silently_accepted(
+def test_non_finite_similarity_is_neutralized(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = _adapter(
+        monkeypatch,
+        response={
+            "code": 0,
+            "data": {
+                "chunks": [
+                    {
+                        "id": "chunk-1",
+                        "dataset_id": "dataset-project-a",
+                        "content": "context",
+                        "similarity": "nan",
+                    }
+                ]
+            },
+        },
+    )
+
+    records = adapter.retrieve(mission=_mission(), query="context")
+    assert records[0]["relevance_score"] == 0.0
+
+
+def test_ragflow_application_error_is_sanitized_and_not_silently_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = _adapter(
         monkeypatch,
-        response={"code": 100, "message": "invalid dataset", "data": None},
+        response={"code": 100, "message": "invalid\n\tdataset", "data": None},
     )
 
-    with pytest.raises(RuntimeError, match="invalid dataset"):
+    with pytest.raises(RuntimeError, match="invaliddataset"):
         adapter.retrieve(mission=_mission(), query="context")
