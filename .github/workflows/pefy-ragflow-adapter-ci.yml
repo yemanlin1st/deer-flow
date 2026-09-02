@@ -8,19 +8,23 @@ on:
       - "backend/packages/harness/deerflow/pefy_omega/ragflow_adapter.py"
       - "backend/packages/harness/deerflow/pefy_omega/__init__.py"
       - "backend/tests/test_pefy_ragflow_adapter.py"
+      - "scripts/qualify_pefy_ragflow_live.py"
       - "config/pefy_ragflow_omega.example.yaml"
       - "config/ragflow_upstream.lock.json"
       - "docs/PEFY_RAGFLOW_OMEGA_ADAPTER.md"
       - ".github/workflows/pefy-ragflow-adapter-ci.yml"
+      - ".github/workflows/pefy-ragflow-live-lab.yml"
   pull_request:
     paths:
       - "backend/packages/harness/deerflow/pefy_omega/ragflow_adapter.py"
       - "backend/packages/harness/deerflow/pefy_omega/__init__.py"
       - "backend/tests/test_pefy_ragflow_adapter.py"
+      - "scripts/qualify_pefy_ragflow_live.py"
       - "config/pefy_ragflow_omega.example.yaml"
       - "config/ragflow_upstream.lock.json"
       - "docs/PEFY_RAGFLOW_OMEGA_ADAPTER.md"
       - ".github/workflows/pefy-ragflow-adapter-ci.yml"
+      - ".github/workflows/pefy-ragflow-live-lab.yml"
 
 permissions:
   contents: read
@@ -42,8 +46,10 @@ jobs:
       - name: Install test runner
         run: python -m pip install --disable-pip-version-check pytest
 
-      - name: Compile PEFY Omega package
-        run: python -m compileall -q backend/packages/harness/deerflow/pefy_omega
+      - name: Compile PEFY Omega package and live probe
+        run: |
+          python -m compileall -q backend/packages/harness/deerflow/pefy_omega
+          python -m py_compile scripts/qualify_pefy_ragflow_live.py
 
       - name: Validate upstream lock
         run: |
@@ -98,7 +104,9 @@ jobs:
               "project_scope_no_implicit_tenant_fallback_gate": True,
               "post_retrieval_dataset_authorization_gate": True,
               "bounded_hydration_gate": True,
+              "bounded_transport_gate": True,
               "https_endpoint_gate": True,
+              "live_probe_syntax_gate": True,
               "production_claim": False,
               "next_gate": "live-pinned-ragflow-integration",
           }
